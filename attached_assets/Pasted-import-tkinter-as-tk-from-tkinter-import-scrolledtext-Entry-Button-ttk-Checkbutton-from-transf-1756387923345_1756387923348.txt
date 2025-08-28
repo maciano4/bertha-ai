@@ -1,0 +1,132 @@
+import tkinter as tk
+from tkinter import scrolledtext, Entry, Button, ttk, Checkbutton
+from transformers import T5Tokenizer, T5ForConditionalGeneration
+import torch, requests, os, cv2
+from googlesearch import search
+from bs4 import BeautifulSoup
+from datetime import datetime
+import speech_recognition as sr
+import pyttsx3
+from googletrans import Translator, LANGUAGES
+from threading import Thread
+from PIL import Image, ImageTk
+
+# Load T5 model locally if available, otherwise download
+model_dir = os.path.join(os.path.dirname(__file__), 't5-small')
+if os.path.exists(model_dir):
+    tokenizer = T5Tokenizer.from_pretrained(model_dir)
+    model = T5ForConditionalGeneration.from_pretrained(model_dir)
+else:
+    tokenizer = T5Tokenizer.from_pretrained('t5-small')
+    model = T5ForConditionalGeneration.from_pretrained('t5-small')
+    tokenizer.save_pretrained(model_dir)
+    model.save_pretrained(model_dir)
+
+recognizer = sr.Recognizer()
+tts_engine = pyttsx3.init()
+tts_engine.setProperty('rate', 150)
+translator = Translator()
+conversation_history = []
+speak_enabled = tk.BooleanVar(value=False)
+output_lang = tk.StringVar(value='en')
+cap = cv2.VideoCapture(0)
+
+def log(message, panel):
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    panel.config(state='normal')
+    panel.insert(tk.END, f"[{timestamp}] {message}\n")
+    panel.config(state='disabled')
+    panel.see(tk.END)
+
+def deep_search(user_input, search_output):
+    results = []
+    log(f"Performing web search: {user_input}", search_output)
+    try:
+        for url in search(user_input, num=2):
+            response = requests.get(url, timeout=5)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            text = ' '.join(p.get_text(strip=True) for p in soup.find_all('p')[:2])
+            results.append(text[:500])
+            log(f"Found from {url}: {text[:100]}...", search_output)
+    except Exception as e:
+        results.append(f"Web search failed: {str(e)}")
+        log(f"Web search error: {str(e)}", search_output)
+    return " ".join(results)[:1000] if results else "No results found."
+
+def generate_response(user_input, reasoning_output, search_output, log_output):
+    user_input_en = translator.translate(user_input, dest='en').text if translator.detect(user_input).lang != 'en' else user_input
+    conversation_history.append(user_input_en)
+    context = " ".join(conversation_history[-3:])
+
+    prompt = f"reason about: {user_input_en}"
+    inputs = tokenizer(prompt, return_tensors="pt", max_length=512, truncation=True)
+    outputs = model.generate(inputs["input_ids"], max_length=300, num_beams=4, early_stopping=True)
+    response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+
+    if len(response.split()) < 20:
+        response += f"\nWeb Search Info: {deep_search(context, search_output)}"
+
+    final_response = translator.translate(response, dest=output_lang.get()).text if output_lang.get() != 'en' else response
+
+    reasoning_output.config(state='normal')
+    reasoning_output.insert(tk.END, final_response + "\n\n")
+    reasoning_output.config(state='disabled')
+
+    if speak_enabled.get():
+        tts_engine.say(final_response)
+        tts_engine.runAndWait()
+
+def update_hologram():
+    ret, frame = cap.read()
+    if ret:
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame = cv2.resize(frame, (320, 240))
+        img = Image.fromarray(frame)
+        imgtk = ImageTk.PhotoImage(image=img)
+        hologram_label.imgtk = imgtk
+        hologram_label.configure(image=imgtk)
+    hologram_label.after(10, update_hologram)
+
+def listen_to_speech():
+    with sr.Microphone() as source:
+        audio = recognizer.listen(source, timeout=5)
+        user_input = recognizer.recognize_google(audio, language=output_lang.get())
+        entry.delete(0, tk.END)
+        entry.insert(0, user_input)
+        send_message()
+
+def send_message():
+    user_input = entry.get().strip()
+    if user_input:
+        Thread(target=generate_response, args=(user_input, reasoning_output, search_output, log_output)).start()
+        entry.delete(0, tk.END)
+
+def clear_all():
+    for panel in [reasoning_output, search_output, log_output]:
+        panel.config(state='normal')
+        panel.delete(1.0, tk.END)
+        panel.config(state='disabled')
+
+root = tk.Tk()
+root.title("BERTHA AI - Multilingual, Camera & Voice Chat")
+root.geometry("900x700")
+
+reasoning_output = scrolledtext.ScrolledText(root, state='disabled', bg="white")
+reasoning_output.pack()
+search_output = scrolledtext.ScrolledText(root, state='disabled', bg="white")
+search_output.pack()
+log_output = scrolledtext.ScrolledText(root, state='disabled', bg="white")
+log_output.pack()
+hologram_label = tk.Label(root)
+hologram_label.pack()
+
+entry = Entry(root, width=60)
+entry.pack()
+
+Button(root, text="Send", command=send_message).pack()
+Button(root, text="Listen", command=lambda: Thread(target=listen_to_speech).start()).pack()
+Checkbutton(root, text="Speak Responses", variable=speak_enabled).pack()
+ttk.Combobox(root, textvariable=output_lang, values=list(LANGUAGES.keys())).pack()
+
+update_hologram()
+root.mainloop()
