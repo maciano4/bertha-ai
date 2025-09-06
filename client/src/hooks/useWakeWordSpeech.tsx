@@ -182,6 +182,12 @@ export function useWakeWordSpeech() {
     };
 
     recognition.onend = () => {
+      // Don't auto-restart if manually paused for speech synthesis
+      if (recognition._manuallyPaused) {
+        console.log('🚫 Recognition manually paused - NOT auto-restarting');
+        return;
+      }
+      
       // Auto-restart unless explicitly stopped (preserve conversation mode)
       if (!recognition._stopped) {
         setTimeout(() => {
@@ -240,9 +246,10 @@ export function useWakeWordSpeech() {
     console.log('🛑 STOPPING wake word detection completely');
     isPausedRef.current = true;
     
-    // Completely stop recognition - don't restart until resume
+    // Completely stop recognition and prevent auto-restart
     if (recognitionRef.current) {
       try {
+        recognitionRef.current._manuallyPaused = true; // Flag to prevent auto-restart
         recognitionRef.current._stopRequested = true;
         recognitionRef.current.stop();
         console.log('🔇 Speech recognition STOPPED during Bertha speech');
@@ -262,6 +269,7 @@ export function useWakeWordSpeech() {
       // Restart speech recognition completely
       if (recognitionRef.current) {
         try {
+          recognitionRef.current._manuallyPaused = false; // Clear the manual pause flag
           recognitionRef.current._stopRequested = false;
           recognitionRef.current.start();
           console.log('🎤 Wake word detection RESTARTED after cooldown');
