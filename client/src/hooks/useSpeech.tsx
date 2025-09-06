@@ -18,107 +18,96 @@ export function useSpeech() {
       // Cancel any ongoing speech
       window.speechSynthesis.cancel();
       
-      // Get available voices with proper loading handling
-      let voices = window.speechSynthesis.getVoices();
-      
-      // If no voices loaded yet, force a reload and wait
-      if (voices.length === 0) {
-        // Trigger voice loading
-        window.speechSynthesis.onvoiceschanged = () => {
-          voices = window.speechSynthesis.getVoices();
-          console.log('Voices reloaded:', voices.length);
+      // Function to actually speak with proper voice selection
+      const doSpeak = (voiceList: SpeechSynthesisVoice[]) => {
+        console.log('Available voices:', voiceList.map(v => `${v.name} (${v.lang})`));
+        
+        // Find the best female voice for a Cameroon grandmother
+        let selectedVoice = 
+          // First: British/UK female voices 
+          voiceList.find(voice => 
+            voice.lang.includes('en-GB') && 
+            voice.name.toLowerCase().includes('female')
+          ) ||
+          // Second: Any female voice by name pattern
+          voiceList.find(voice => 
+            voice.name.toLowerCase().includes('female') &&
+            !voice.name.toLowerCase().includes('male')
+          ) ||
+          // Third: Voices with common female names
+          voiceList.find(voice => 
+            /\b(linda|zira|susan|anna|karen|sarah|emma|sophie|marie|claire|samantha|victoria)\b/i.test(voice.name)
+          ) ||
+          // Fourth: French voices for bilingual background
+          voiceList.find(voice => 
+            voice.lang.startsWith('fr')
+          ) ||
+          // Last: Avoid male voices explicitly
+          voiceList.find(voice => 
+            !voice.name.toLowerCase().includes('male') && 
+            !voice.name.toLowerCase().includes('man') &&
+            !voice.name.toLowerCase().includes('david') &&
+            !voice.name.toLowerCase().includes('richard') &&
+            !voice.name.toLowerCase().includes('mark') &&
+            voice.lang.startsWith('en')
+          );
+        
+        console.log('Selected voice:', selectedVoice ? `${selectedVoice.name} (${selectedVoice.lang})` : 'default');
+        
+        const utterance = new SpeechSynthesisUtterance(text);
+        
+        // Set voice if found
+        if (selectedVoice) {
+          utterance.voice = selectedVoice;
+        }
+        
+        // Grandmother voice characteristics
+        utterance.rate = 0.75; // Slow, deliberate speech
+        utterance.pitch = selectedVoice?.name.toLowerCase().includes('female') ? 1.0 : 1.1; // Female-like pitch
+        utterance.volume = 0.95;
+        
+        utterance.onstart = () => {
+          setIsSpeaking(true);
+          console.log(`Speaking with voice: ${selectedVoice ? selectedVoice.name : 'default'} (${selectedVoice ? selectedVoice.lang : 'default'})`);
         };
         
-        // Also try after a short delay
-        setTimeout(() => {
-          voices = window.speechSynthesis.getVoices();
-          if (voices.length === 0) {
-            console.warn('No voices available for speech synthesis');
+        utterance.onend = () => {
+          setIsSpeaking(false);
+          console.log('Speech synthesis completed');
+        };
+        
+        utterance.onerror = (event) => {
+          setIsSpeaking(false);
+          console.error('Speech synthesis error:', event.error);
+        };
+        
+        console.log('Starting speech synthesis...');
+        window.speechSynthesis.speak(utterance);
+      };
+      
+      // Get voices and handle loading
+      const voices = window.speechSynthesis.getVoices();
+      
+      if (voices.length > 0) {
+        doSpeak(voices);
+      } else {
+        // Wait for voices to load
+        window.speechSynthesis.onvoiceschanged = () => {
+          const loadedVoices = window.speechSynthesis.getVoices();
+          if (loadedVoices.length > 0) {
+            console.log('Voices loaded:', loadedVoices.length);
+            doSpeak(loadedVoices);
           }
-        }, 200);
+        };
+        
+        // Fallback after delay
+        setTimeout(() => {
+          const fallbackVoices = window.speechSynthesis.getVoices();
+          if (fallbackVoices.length > 0) {
+            doSpeak(fallbackVoices);
+          }
+        }, 300);
       }
-      
-      console.log('Available voices:', voices.map(v => `${v.name} (${v.lang})`));
-      
-      // Find the best female voice for a Cameroon grandmother
-      // Priority order: French female, British female, any female voice
-      let selectedVoice = 
-        // First try: French voices (closest to Cameroon bilingual background)
-        voices.find(voice => 
-          voice.lang.startsWith('fr') && 
-          (voice.name.toLowerCase().includes('female') || voice.name.toLowerCase().includes('femme'))
-        ) ||
-        // Second try: British/UK female voices (colonial history)
-        voices.find(voice => 
-          voice.lang.includes('en-GB') && 
-          voice.name.toLowerCase().includes('female')
-        ) ||
-        // Third try: Any female voice by name pattern
-        voices.find(voice => 
-          voice.name.toLowerCase().includes('female') &&
-          !voice.name.toLowerCase().includes('male')
-        ) ||
-        // Fourth try: Voices with common female names
-        voices.find(voice => 
-          /\b(linda|zira|susan|anna|karen|sarah|emma|sophie|marie|claire|samantha|victoria)\b/i.test(voice.name)
-        ) ||
-        // Fifth try: Look for voices that don't have male indicators
-        voices.find(voice => 
-          !voice.name.toLowerCase().includes('male') && 
-          !voice.name.toLowerCase().includes('man') &&
-          !voice.name.toLowerCase().includes('david') &&
-          !voice.name.toLowerCase().includes('richard') &&
-          !voice.name.toLowerCase().includes('mark') &&
-          voice.lang.startsWith('en')
-        );
-      
-      // Add warm, caring grandmother phrases occasionally
-      const grandmotherPhrases = [
-        "my dear child", "sweetheart", "little one", "my precious", 
-        "child of my heart", "dear one"
-      ];
-      
-      // Occasionally add grandmother warmth to responses
-      if (Math.random() < 0.3 && text.length > 50) {
-        const phrase = grandmotherPhrases[Math.floor(Math.random() * grandmotherPhrases.length)];
-        text = `${phrase}, ${text}`;
-      }
-      
-      const utterance = new SpeechSynthesisUtterance(text);
-      
-      // Set voice if found
-      if (selectedVoice) {
-        utterance.voice = selectedVoice;
-      }
-      
-      // Grandmother voice characteristics
-      utterance.rate = Math.min(rate, 0.75); // Even slower, more deliberate speech like an elderly person
-      utterance.pitch = selectedVoice?.name.toLowerCase().includes('female') ? 1.0 : 0.9; // Adjust pitch based on voice
-      utterance.volume = 0.95; // Clear, warm volume
-      
-      // Add some regional speech patterns for Cameroon influence
-      utterance.onstart = () => {
-        setIsSpeaking(true);
-        console.log(`Speaking with voice: ${selectedVoice ? selectedVoice.name : 'default'} (${selectedVoice ? selectedVoice.lang : 'default'})`);
-      };
-      
-      utterance.onend = () => {
-        setIsSpeaking(false);
-        console.log('Speech synthesis completed');
-      };
-      
-      utterance.onerror = (event) => {
-        setIsSpeaking(false);
-        console.error('Speech synthesis error:', event.error);
-        toast({
-          title: "Speech Error", 
-          description: `Failed to speak: ${event.error}`,
-          variant: "destructive"
-        });
-      };
-      
-      console.log('Starting speech synthesis...');
-      window.speechSynthesis.speak(utterance);
     } else {
       toast({
         title: "Not Supported",
