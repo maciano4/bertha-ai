@@ -11,9 +11,10 @@ interface ChatInputProps {
   onSendMessage: (message: string) => void;
   isLoading: boolean;
   language: string;
+  speechEnabled?: boolean;
 }
 
-export default function ChatInput({ onSendMessage, isLoading, language }: ChatInputProps) {
+export default function ChatInput({ onSendMessage, isLoading, language, speechEnabled = false }: ChatInputProps) {
   const [message, setMessage] = useState("");
   const [charCount, setCharCount] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -71,10 +72,23 @@ export default function ChatInput({ onSendMessage, isLoading, language }: ChatIn
         zh: "zh-CN"
       };
 
-      startListening((transcript) => {
-        setMessage(prev => prev + transcript);
-        setCharCount(prev => prev + transcript.length);
-      }, languageMap[language] || "en-US");
+      // Auto-send callback for when speech recognition detects silence
+      const handleAutoSend = () => {
+        if (message.trim()) {
+          handleSend();
+        }
+      };
+
+      startListening(
+        (transcript) => {
+          setMessage(prev => prev + transcript);
+          setCharCount(prev => prev + transcript.length);
+        }, 
+        languageMap[language] || "en-US",
+        speechEnabled, // Enable auto-send when speech is enabled
+        handleAutoSend, // Callback for auto-sending
+        2000 // 2 seconds of silence before auto-send
+      );
     }
   };
 
@@ -129,8 +143,12 @@ export default function ChatInput({ onSendMessage, isLoading, language }: ChatIn
         onClick={handleVoiceInput}
         className={isListening ? "speech-pulse" : ""}
         data-testid="button-voice"
+        title={speechEnabled ? "Click to speak - will auto-send when you stop talking" : "Click to speak"}
       >
         <Mic className="h-5 w-5" />
+        {speechEnabled && !isListening && (
+          <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+        )}
       </Button>
 
       {/* Camera Capture Button */}

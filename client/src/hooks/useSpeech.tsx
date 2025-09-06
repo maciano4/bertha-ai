@@ -5,6 +5,8 @@ export function useSpeech() {
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const onAutoSendRef = useRef<(() => void) | null>(null);
   const { toast } = useToast();
 
   // Text-to-Speech
@@ -43,8 +45,14 @@ export function useSpeech() {
     }
   }, []);
 
-  // Speech-to-Text
-  const startListening = useCallback((onResult: (text: string) => void, language: string = 'en-US') => {
+  // Speech-to-Text with auto-send capability
+  const startListening = useCallback((
+    onResult: (text: string) => void, 
+    language: string = 'en-US',
+    autoSend: boolean = false,
+    onAutoSend?: () => void,
+    silenceTimeout: number = 2000
+  ) => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       toast({
         title: "Not Supported",
@@ -57,17 +65,49 @@ export function useSpeech() {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     
-    recognition.continuous = false;
-    recognition.interimResults = false;
+    recognition.continuous = autoSend; // Enable continuous mode for auto-send
+    recognition.interimResults = autoSend; // Enable interim results for better UX
     recognition.lang = language;
+    
+    // Store auto-send callback for later use
+    if (autoSend && onAutoSend) {
+      onAutoSendRef.current = onAutoSend;
+    }
 
     recognition.onstart = () => {
       setIsListening(true);
     };
 
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      onResult(transcript);
+      let transcript = '';
+      
+      // Handle both interim and final results
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          transcript += result[0].transcript;
+        }
+      }
+      
+      if (transcript) {
+        onResult(transcript);
+        
+        // If auto-send is enabled, start silence detection
+        if (autoSend && onAutoSendRef.current) {
+          // Clear existing timer
+          if (silenceTimerRef.current) {
+            clearTimeout(silenceTimerRef.current);
+          }
+          
+          // Set new timer for silence detection
+          silenceTimerRef.current = setTimeout(() => {
+            // Stop listening and auto-send
+            recognition.stop();
+            onAutoSendRef.current?.();
+            onAutoSendRef.current = null;
+          }, silenceTimeout);
+        }
+      }
     };
 
     recognition.onerror = (event: any) => {
@@ -81,6 +121,22 @@ export function useSpeech() {
 
     recognition.onend = () => {
       setIsListening(false);
+      
+      // Clear any pending silence timer
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+      
+      // Don't auto-restart if we're in auto-send mode and stopping intentionally
+      if (autoSend && recognition.continuous && !recognition._stopRequested) {
+        // Restart recognition for continuous listening
+        setTimeout(() => {
+          if (recognitionRef.current === recognition && !recognition._stopRequested) {
+            recognition.start();
+          }
+        }, 100);
+      }
     };
 
     recognitionRef.current = recognition;
@@ -89,9 +145,20 @@ export function useSpeech() {
 
   const stopListening = useCallback(() => {
     if (recognitionRef.current) {
+      // Mark as intentional stop to prevent restart
+      recognitionRef.current._stopRequested = true;
       recognitionRef.current.stop();
       setIsListening(false);
     }
+    
+    // Clear any pending silence timer
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    
+    // Clear auto-send callback
+    onAutoSendRef.current = null;
   }, []);
 
   return {

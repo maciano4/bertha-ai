@@ -140,6 +140,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
           onSendMessage={handleSendMessage}
           isLoading={isLoading}
           language={settings.language}
+          speechEnabled={settings.speechEnabled}
         />
 
         {/* Quick Actions */}
