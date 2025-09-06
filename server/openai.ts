@@ -19,7 +19,8 @@ export async function generateChatResponse(
   conversationHistory: Array<{ role: string; content: string }>,
   language: string = "en",
   searchResults?: string,
-  includeNLP: boolean = true
+  includeNLP: boolean = true,
+  recognizedUser?: string
 ): Promise<ChatResponse> {
   try {
     // Perform NLP analysis on the user's message
@@ -37,6 +38,11 @@ export async function generateChatResponse(
     Always provide thoughtful and detailed responses. If web search results are provided, incorporate them naturally into your response.
     
     Response language: ${language === "en" ? "English" : `Translate your response to language code: ${language}`}`;
+
+    // Add voice recognition context
+    if (recognizedUser) {
+      systemPrompt += `\n\nIMPORTANT: The user speaking to you is ${recognizedUser}. Address them by name and personalize your responses. Show that you remember them and are happy to chat with them again.`;
+    }
 
     // Enhance system prompt with NLP insights
     if (nlpAnalysis) {

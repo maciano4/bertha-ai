@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { generateChatResponse, translateText, analyzeImage } from "./openai";
+import { voiceProfileStorage, analyzeVoiceInput, type VoiceProfile } from "./voiceProfiles";
 import { ObjectStorageService } from "./objectStorage";
 import { insertMessageSchema, insertUserSettingsSchema } from "@shared/schema";
 import { z } from "zod";
@@ -19,6 +20,80 @@ async function performWebSearch(query: string): Promise<string> {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Voice profile endpoints
+  app.post("/api/voice/profiles", async (req, res) => {
+    try {
+      const { name, samples, language = 'en-US' } = req.body;
+
+      if (!name || !Array.isArray(samples) || samples.length < 3) {
+        return res.status(400).json({ error: "Name and at least 3 voice samples required" });
+      }
+
+      // Create voice profile
+      const profile = voiceProfileStorage.createProfile(name, language);
+      
+      // Add voice samples
+      for (const sample of samples) {
+        const characteristics = analyzeVoiceInput(sample, language);
+        voiceProfileStorage.addVoiceSample(profile.id, sample, characteristics);
+      }
+
+      res.json({
+        success: true,
+        profileId: profile.id,
+        name: profile.name,
+        samplesCount: samples.length
+      });
+    } catch (error) {
+      console.error("Voice profile creation error:", error);
+      res.status(500).json({ error: "Failed to create voice profile" });
+    }
+  });
+
+  app.get("/api/voice/profiles", async (req, res) => {
+    try {
+      const profiles = voiceProfileStorage.getAllProfiles().map(p => ({
+        id: p.id,
+        name: p.name,
+        language: p.voiceCharacteristics.language,
+        samplesCount: p.voiceSamples.length,
+        usageCount: p.usageCount,
+        lastUsed: p.lastUsed
+      }));
+      
+      res.json({ profiles });
+    } catch (error) {
+      console.error("Voice profiles fetch error:", error);
+      res.status(500).json({ error: "Failed to fetch voice profiles" });
+    }
+  });
+
+  app.delete("/api/voice/profiles/:profileId", async (req, res) => {
+    try {
+      const { profileId } = req.params;
+      const deleted = voiceProfileStorage.deleteProfile(profileId);
+      
+      if (deleted) {
+        res.json({ success: true, message: "Voice profile deleted" });
+      } else {
+        res.status(404).json({ error: "Voice profile not found" });
+      }
+    } catch (error) {
+      console.error("Voice profile deletion error:", error);
+      res.status(500).json({ error: "Failed to delete voice profile" });
+    }
+  });
+
+  app.get("/api/voice/stats", async (req, res) => {
+    try {
+      const stats = voiceProfileStorage.getStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Voice stats error:", error);
+      res.status(500).json({ error: "Failed to get voice stats" });
+    }
+  });
+
   // Chat endpoint
   app.post("/api/chat", async (req, res) => {
     try {
@@ -44,13 +119,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         searchResults = await performWebSearch(message);
       }
 
+      // Check for voice recognition if message contains speech
+      let recognizedUser: string | null = null;
+      const voiceMatch = voiceProfileStorage.findMatch(message, language);
+      if (voiceMatch && voiceMatch.confidence > 0.6) {
+        recognizedUser = voiceMatch.name;
+        voiceProfileStorage.updateUsage(voiceMatch.profileId);
+      }
+
       // Generate AI response with NLP analysis
       const aiResponse = await generateChatResponse(
         message,
         conversationHistory,
         language,
         searchResults,
-        true // Enable NLP analysis
+        true, // Enable NLP analysis
+        recognizedUser // Pass recognized user
       );
 
       // Save user message if conversation exists
@@ -81,10 +165,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Check for voice recognition if message contains speech
+      let recognizedUser: string | null = null;
+      if (aiResponse.nlpAnalysis) {
+        const voiceMatch = voiceProfileStorage.findMatch(message, language);
+        if (voiceMatch && voiceMatch.confidence > 0.6) {
+          recognizedUser = voiceMatch.name;
+          voiceProfileStorage.updateUsage(voiceMatch.profileId);
+        }
+      }
+
       res.json({
         response: aiResponse.content,
         searchUsed: aiResponse.searchUsed,
         translationUsed: aiResponse.translationUsed,
+        recognizedUser,
         timestamp: new Date().toISOString()
       });
 
