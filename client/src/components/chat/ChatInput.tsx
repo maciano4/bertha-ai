@@ -72,15 +72,20 @@ export default function ChatInput({ onSendMessage, isLoading, language, speechEn
         zh: "zh-CN"
       };
 
+      // Store the accumulated speech text to send
+      let accumulatedText = "";
+
       // Auto-send callback for when speech recognition detects silence
       const handleAutoSend = () => {
-        console.log('Auto-send triggered, current message:', message);
-        const currentMessage = message.trim();
-        if (currentMessage) {
-          console.log('Sending message:', currentMessage);
-          onSendMessage(currentMessage);
+        console.log('Auto-send triggered, accumulated text:', accumulatedText);
+        // Use the accumulated text from speech recognition, not the state
+        const textToSend = accumulatedText.trim();
+        if (textToSend) {
+          console.log('Sending message:', textToSend);
+          onSendMessage(textToSend);
           setMessage("");
           setCharCount(0);
+          accumulatedText = ""; // Clear accumulated text
           
           if (textareaRef.current) {
             textareaRef.current.style.height = "auto";
@@ -94,8 +99,14 @@ export default function ChatInput({ onSendMessage, isLoading, language, speechEn
         (transcript) => {
           const cleanTranscript = transcript.trim();
           if (cleanTranscript) {
+            // Update the accumulated text for auto-send
+            accumulatedText = accumulatedText + (accumulatedText ? ' ' : '') + cleanTranscript;
+            
+            // Update the UI state
             setMessage(prev => prev + (prev ? ' ' : '') + cleanTranscript);
             setCharCount(prev => prev + cleanTranscript.length + (prev ? 1 : 0));
+            
+            console.log('Updated accumulated text:', accumulatedText);
           }
         }, 
         languageMap[language] || "en-US",
