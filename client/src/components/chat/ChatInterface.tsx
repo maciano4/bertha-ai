@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useChat } from "@/hooks/useChat";
 import { useSpeech } from "@/hooks/useSpeech";
-import { useWakeWordChat } from "@/hooks/useWakeWordChat";
+import { useWakeWordSpeech } from "@/hooks/useWakeWordSpeech";
 import MessageBubble from "./MessageBubble";
 import ChatInput from "./ChatInput";
 import { NLPInsights } from "@/components/nlp/NLPInsights";
@@ -24,8 +24,8 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
   });
 
   const { messages, isLoading, sendMessage, messagesEndRef, scrollToBottom } = useChat(conversationId);
-  const { speak, stopSpeaking, isSpeaking, startWakeWordListening, stopWakeWordListening, isWakeWordListening } = useSpeech();
-  const { startWakeWordChat } = useWakeWordChat();
+  const { speak, stopSpeaking, isSpeaking } = useSpeech();
+  const { isWakeWordListening, startWakeWordListening, stopWakeWordListening } = useWakeWordSpeech();
 
   // Auto-scroll when new messages arrive
   useEffect(() => {
@@ -73,13 +73,11 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
   // Wake word listening management
   useEffect(() => {
     if (settings.wakeWordEnabled && !isWakeWordListening) {
-      // Start wake word listening
-      const handleWakeWordDetected = () => {
-        console.log('Wake word detected - starting wake word chat');
-        startWakeWordChat(handleSendMessage, 'en-US');
-      };
-      
-      startWakeWordListening(handleWakeWordDetected);
+      // Start wake word listening with direct message handling
+      startWakeWordListening((message: string) => {
+        console.log('Wake word message received:', message);
+        handleSendMessage(message);
+      });
     } else if (!settings.wakeWordEnabled && isWakeWordListening) {
       // Stop wake word listening
       stopWakeWordListening();
@@ -91,7 +89,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
         stopWakeWordListening();
       }
     };
-  }, [settings.wakeWordEnabled, isWakeWordListening, startWakeWordListening, stopWakeWordListening, startWakeWordChat, handleSendMessage]);
+  }, [settings.wakeWordEnabled, isWakeWordListening, startWakeWordListening, stopWakeWordListening, handleSendMessage]);
 
   const toggleSpeech = () => {
     if (isSpeaking) {
