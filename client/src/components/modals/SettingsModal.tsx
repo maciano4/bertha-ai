@@ -7,9 +7,10 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Separator } from "@/components/ui/separator";
 import { ObjectUploader } from "@/components/ObjectUploader";
-import { X, Upload } from "lucide-react";
+import { X, Upload, User } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { VoiceProfileManager } from "../voice/VoiceProfileManager";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -147,7 +148,7 @@ export default function SettingsModal({ isOpen, onClose, onBackgroundChange }: S
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto" data-testid="modal-settings">
+      <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" data-testid="modal-settings">
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
             Settings
@@ -228,6 +229,17 @@ export default function SettingsModal({ isOpen, onClose, onBackgroundChange }: S
                 />
               </div>
             </div>
+          </div>
+
+          <Separator />
+
+          {/* Voice Profiles */}
+          <div>
+            <h3 className="font-medium text-foreground mb-3 flex items-center gap-2">
+              <User className="w-4 h-4" />
+              Voice Recognition
+            </h3>
+            <VoiceProfileManager />
           </div>
 
           <Separator />
