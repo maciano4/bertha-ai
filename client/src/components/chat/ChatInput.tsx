@@ -112,7 +112,7 @@ export default function ChatInput({ onSendMessage, isLoading, language, speechEn
         languageMap[language] || "en-US",
         speechEnabled, // Enable auto-send when speech is enabled
         handleAutoSend, // Callback for auto-sending
-        2000 // 2 seconds of silence before auto-send
+        1000 // 1 second of silence before auto-send
       );
     }
   };

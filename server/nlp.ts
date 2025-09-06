@@ -74,7 +74,7 @@ export async function recognizeIntent(message: string): Promise<UserIntent> {
           content: message
         }
       ],
-      max_completion_tokens: 50
+      max_completion_tokens: 20
     });
 
     const intentStr = response.choices[0].message.content?.trim().toLowerCase();
@@ -106,7 +106,7 @@ export async function extractEntities(message: string): Promise<ExtractedEntity[
           content: message
         }
       ],
-      max_completion_tokens: 200,
+      max_completion_tokens: 50,
       response_format: { type: "json_object" }
     });
 
@@ -139,7 +139,7 @@ export async function analyzeSentiment(message: string): Promise<SentimentAnalys
           content: message
         }
       ],
-      max_completion_tokens: 100,
+      max_completion_tokens: 30,
       response_format: { type: "json_object" }
     });
 
@@ -197,7 +197,7 @@ export async function extractKeywords(message: string): Promise<string[]> {
           content: message
         }
       ],
-      max_completion_tokens: 100,
+      max_completion_tokens: 30,
       response_format: { type: "json_object" }
     });
 
@@ -236,7 +236,7 @@ export async function analyzeContext(
           content: `Recent conversation:\n${recentHistory}\n\nCurrent message: ${currentMessage}`
         }
       ],
-      max_completion_tokens: 150,
+      max_completion_tokens: 40,
       response_format: { type: "json_object" }
     });
 
