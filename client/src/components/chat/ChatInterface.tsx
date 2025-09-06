@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useChat } from "@/hooks/useChat";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useWakeWordSpeech } from "@/hooks/useWakeWordSpeech";
@@ -40,8 +40,8 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     }
   }, []);
 
-  // Create conversation when first message is sent
-  const handleSendMessage = async (message: string) => {
+  // Create conversation when first message is sent (stable callback to prevent wake word restarts)
+  const handleSendMessage = useCallback(async (message: string) => {
     if (!conversationId) {
       // Create new conversation
       try {
@@ -58,7 +58,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     }
     
     await sendMessage(message, settings);
-  };
+  }, [conversationId, onConversationStart, sendMessage, settings]);
 
   // Handle AI response speech
   useEffect(() => {
@@ -70,15 +70,17 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     }
   }, [messages, settings.speechEnabled, speak, isLoading]);
 
-  // Wake word listening management
+  // Wake word listening management (stable to prevent unnecessary restarts)
   useEffect(() => {
     if (settings.wakeWordEnabled && !isWakeWordListening) {
+      console.log('🎤 Starting wake word listening...');
       // Start wake word listening with direct message handling
       startWakeWordListening((message: string) => {
         console.log('Wake word message received:', message);
         handleSendMessage(message);
       });
     } else if (!settings.wakeWordEnabled && isWakeWordListening) {
+      console.log('🔇 Stopping wake word listening...');
       // Stop wake word listening
       stopWakeWordListening();
     }
@@ -86,6 +88,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     // Cleanup when component unmounts
     return () => {
       if (isWakeWordListening) {
+        console.log('🧹 Cleanup: stopping wake word listening');
         stopWakeWordListening();
       }
     };

@@ -158,11 +158,12 @@ export function useWakeWordSpeech() {
         console.log('Wake word recognition error:', event.error);
       }
       
-      // Auto-restart wake word detection after brief delay
+      // Auto-restart wake word detection after brief delay (preserve conversation mode)
       if (!recognition._stopped) {
         setTimeout(() => {
           try {
             if (recognitionRef.current) {
+              console.log(`🔄 Restarting speech recognition (Conversation mode: ${conversationModeRef.current})`);
               recognition.start();
             }
           } catch (error) {
@@ -173,11 +174,12 @@ export function useWakeWordSpeech() {
     };
 
     recognition.onend = () => {
-      // Auto-restart unless explicitly stopped
+      // Auto-restart unless explicitly stopped (preserve conversation mode)
       if (!recognition._stopped) {
         setTimeout(() => {
           try {
             if (recognitionRef.current) {
+              console.log(`🔄 Auto-restarting speech recognition (Conversation mode: ${conversationModeRef.current})`);
               recognition.start();
             }
           } catch (error) {
@@ -199,7 +201,8 @@ export function useWakeWordSpeech() {
       console.log('Wake word detection stopped');
     }
     
-    // Clear conversation mode
+    // Only clear conversation mode when explicitly stopping (not during restarts)
+    console.log('🛑 Explicitly stopping wake word - clearing conversation mode');
     conversationModeRef.current = false;
     if (conversationTimeoutRef.current) {
       clearTimeout(conversationTimeoutRef.current);
