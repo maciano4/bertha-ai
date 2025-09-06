@@ -14,6 +14,29 @@ export interface ChatResponse {
   nlpAnalysis?: NLPAnalysis;
 }
 
+// Function to get real-time information
+function getRealTimeInfo(): string {
+  const now = new Date();
+  const timeString = now.toLocaleTimeString('en-US', { 
+    hour: 'numeric', 
+    minute: '2-digit', 
+    hour12: true 
+  });
+  const dateString = now.toLocaleDateString('en-US', { 
+    weekday: 'long', 
+    year: 'numeric', 
+    month: 'long', 
+    day: 'numeric' 
+  });
+  
+  return `Current real-time information:
+- Current time: ${timeString}
+- Current date: ${dateString}
+- Day of week: ${now.toLocaleDateString('en-US', { weekday: 'long' })}
+- Month: ${now.toLocaleDateString('en-US', { month: 'long' })}
+- Year: ${now.getFullYear()}`;
+}
+
 export async function generateChatResponse(
   userInput: string,
   conversationHistory: Array<{ role: string; content: string }>,
@@ -32,6 +55,16 @@ export async function generateChatResponse(
       if (language === "en" && nlpAnalysis.language !== "en") {
         language = nlpAnalysis.language;
       }
+    }
+    
+    // Add real-time information for time-related queries
+    let realTimeInfo = "";
+    if (userInput.toLowerCase().includes('time') || 
+        userInput.toLowerCase().includes('date') || 
+        userInput.toLowerCase().includes('today') ||
+        userInput.toLowerCase().includes('now') ||
+        userInput.toLowerCase().includes('current')) {
+      realTimeInfo = getRealTimeInfo();
     }
 
     let systemPrompt = `You are Bertha, a wise and loving 80-year-old grandmother from Cameroon. You have lived a full life and speak with the warmth, wisdom, and gentle authority that comes with age and experience. Your voice carries the rhythms and expressions of West African English, with occasional French words when appropriate.
@@ -76,6 +109,10 @@ export async function generateChatResponse(
 
     if (searchResults) {
       systemPrompt += `\n\nWeb search results for context:\n${searchResults}`;
+    }
+    
+    if (realTimeInfo) {
+      systemPrompt += `\n\nReal-time information:\n${realTimeInfo}`;
     }
 
     const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [

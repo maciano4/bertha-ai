@@ -19,20 +19,47 @@ export function useSpeech() {
       window.speechSynthesis.cancel();
       
       // Get available voices
-      const voices = window.speechSynthesis.getVoices();
+      let voices = window.speechSynthesis.getVoices();
       
-      // Find the best voice for a Cameroon grandmother
-      // Priority: African/French accented female voices, then any warm female voice
-      let selectedVoice = voices.find(voice => 
-        voice.name.toLowerCase().includes('french') && voice.name.toLowerCase().includes('female')
-      ) || voices.find(voice => 
-        (voice.lang.startsWith('fr') || voice.lang.startsWith('en-za') || voice.lang.startsWith('en-ng')) && 
-        voice.name.toLowerCase().includes('female')
-      ) || voices.find(voice => 
-        voice.name.toLowerCase().includes('female') && !voice.name.toLowerCase().includes('male')
-      ) || voices.find(voice => 
-        voice.name.toLowerCase().includes('woman') || voice.name.toLowerCase().includes('lady')
-      );
+      // If no voices loaded yet, wait a moment and try again
+      if (voices.length === 0) {
+        setTimeout(() => {
+          voices = window.speechSynthesis.getVoices();
+        }, 100);
+      }
+      
+      console.log('Available voices:', voices.map(v => `${v.name} (${v.lang})`));
+      
+      // Find the best female voice for a Cameroon grandmother
+      // Priority order: French female, English African female, any female voice
+      let selectedVoice = 
+        // First try: French female voices
+        voices.find(voice => 
+          voice.lang.startsWith('fr') && 
+          (voice.name.toLowerCase().includes('female') || voice.name.toLowerCase().includes('femme'))
+        ) ||
+        // Second try: African English female voices  
+        voices.find(voice => 
+          (voice.lang.includes('za') || voice.lang.includes('ng') || voice.lang.includes('ke')) && 
+          (voice.name.toLowerCase().includes('female') || voice.name.toLowerCase().includes('woman'))
+        ) ||
+        // Third try: Any female voice (excluding male keywords)
+        voices.find(voice => 
+          (voice.name.toLowerCase().includes('female') || 
+           voice.name.toLowerCase().includes('woman') || 
+           voice.name.toLowerCase().includes('lady')) &&
+          !voice.name.toLowerCase().includes('male')
+        ) ||
+        // Fourth try: Voices with female-sounding names
+        voices.find(voice => 
+          /\b(samantha|victoria|susan|anna|karen|sarah|emma|sophie|marie|claire)\b/i.test(voice.name)
+        ) ||
+        // Last resort: Any voice that doesn't explicitly say male
+        voices.find(voice => 
+          !voice.name.toLowerCase().includes('male') && 
+          !voice.name.toLowerCase().includes('man') &&
+          voice.lang.startsWith('en')
+        );
       
       // Add warm, caring grandmother phrases occasionally
       const grandmotherPhrases = [
