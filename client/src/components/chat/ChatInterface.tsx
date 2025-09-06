@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useChat } from "@/hooks/useChat";
 import { useSpeech } from "@/hooks/useSpeech";
+import { useWakeWordChat } from "@/hooks/useWakeWordChat";
 import MessageBubble from "./MessageBubble";
 import ChatInput from "./ChatInput";
 import { NLPInsights } from "@/components/nlp/NLPInsights";
@@ -23,7 +24,8 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
   });
 
   const { messages, isLoading, sendMessage, messagesEndRef, scrollToBottom } = useChat(conversationId);
-  const { speak, stopSpeaking, isSpeaking, startWakeWordListening, stopWakeWordListening, isWakeWordListening, startListening } = useSpeech();
+  const { speak, stopSpeaking, isSpeaking, startWakeWordListening, stopWakeWordListening, isWakeWordListening } = useSpeech();
+  const { startWakeWordChat } = useWakeWordChat();
 
   // Auto-scroll when new messages arrive
   useEffect(() => {
@@ -73,31 +75,8 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     if (settings.wakeWordEnabled && !isWakeWordListening) {
       // Start wake word listening
       const handleWakeWordDetected = () => {
-        console.log('Wake word detected - starting speech recognition');
-        
-        // Auto-send callback for when speech recognition detects silence
-        const handleAutoSend = (transcript: string) => {
-          console.log('Wake word triggered auto-send:', transcript);
-          if (transcript.trim()) {
-            handleSendMessage(transcript);
-          }
-        };
-        
-        // Start speech recognition with auto-send after wake word
-        startListening(
-          (transcript) => {
-            // This callback gets called for each speech result
-            console.log('Wake word speech result:', transcript);
-          },
-          'en-US',
-          true, // Enable auto-send
-          () => {
-            // Get the accumulated speech from the recognition
-            // This will be handled by the updated ChatInput component
-            console.log('Wake word auto-send triggered');
-          },
-          1000 // 1 second silence timeout
-        );
+        console.log('Wake word detected - starting wake word chat');
+        startWakeWordChat(handleSendMessage, 'en-US');
       };
       
       startWakeWordListening(handleWakeWordDetected);
@@ -112,7 +91,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
         stopWakeWordListening();
       }
     };
-  }, [settings.wakeWordEnabled, isWakeWordListening, startWakeWordListening, stopWakeWordListening, startListening]);
+  }, [settings.wakeWordEnabled, isWakeWordListening, startWakeWordListening, stopWakeWordListening, startWakeWordChat, handleSendMessage]);
 
   const toggleSpeech = () => {
     if (isSpeaking) {
