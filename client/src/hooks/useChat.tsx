@@ -12,6 +12,7 @@ export interface Message {
     searchUsed?: boolean;
     translationUsed?: boolean;
     searchResults?: string;
+    recognizedUser?: string;
   };
 }
 
@@ -63,7 +64,8 @@ export function useChat(conversationId: string | null) {
         timestamp: new Date(data.timestamp),
         metadata: {
           searchUsed: data.searchUsed,
-          translationUsed: data.translationUsed
+          translationUsed: data.translationUsed,
+          recognizedUser: data.recognizedUser
         }
       };
       
@@ -74,6 +76,9 @@ export function useChat(conversationId: string | null) {
       }
       if (data.translationUsed) {
         addSystemMessage("Response translated");
+      }
+      if (data.recognizedUser) {
+        addSystemMessage(`👋 Recognized voice: ${data.recognizedUser}`);
       }
     },
     onError: (error) => {

@@ -165,15 +165,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Check for voice recognition if message contains speech
-      let recognizedUser: string | null = null;
-      if (aiResponse.nlpAnalysis) {
-        const voiceMatch = voiceProfileStorage.findMatch(message, language);
-        if (voiceMatch && voiceMatch.confidence > 0.6) {
-          recognizedUser = voiceMatch.name;
-          voiceProfileStorage.updateUsage(voiceMatch.profileId);
-        }
-      }
 
       res.json({
         response: aiResponse.content,
