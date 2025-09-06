@@ -25,7 +25,13 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
 
   const { messages, isLoading, sendMessage, messagesEndRef, scrollToBottom } = useChat(conversationId);
   const { speak, stopSpeaking, isSpeaking } = useSpeech();
-  const { isWakeWordListening, startWakeWordListening, stopWakeWordListening } = useWakeWordSpeech();
+  const { 
+    isWakeWordListening, 
+    startWakeWordListening, 
+    stopWakeWordListening, 
+    pauseWakeWordDetection, 
+    resumeWakeWordDetection 
+  } = useWakeWordSpeech();
 
   // Auto-scroll when new messages arrive
   useEffect(() => {
@@ -60,15 +66,24 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     await sendMessage(message, settings);
   }, [conversationId, onConversationStart, sendMessage, settings]);
 
-  // Handle AI response speech
+  // Handle AI response speech with wake word pausing
   useEffect(() => {
     if (!settings.speechEnabled || !messages.length) return;
 
     const lastMessage = messages[messages.length - 1];
     if (lastMessage.role === "assistant" && !isLoading) {
+      // Pause wake word detection before speaking
+      pauseWakeWordDetection();
+      
+      // Speak the message
       speak(lastMessage.content);
+      
+      // Resume wake word detection after a delay (speech synthesis onend doesn't always fire reliably)
+      setTimeout(() => {
+        resumeWakeWordDetection();
+      }, Math.max(3000, lastMessage.content.length * 100)); // Estimate speech duration
     }
-  }, [messages, settings.speechEnabled, speak, isLoading]);
+  }, [messages, settings.speechEnabled, speak, isLoading, pauseWakeWordDetection, resumeWakeWordDetection]);
 
   // Wake word listening management (run only once on mount)
   useEffect(() => {

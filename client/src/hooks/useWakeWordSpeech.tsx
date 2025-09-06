@@ -7,6 +7,7 @@ export function useWakeWordSpeech() {
   const onMessageDetectedRef = useRef<((message: string) => void) | null>(null);
   const conversationModeRef = useRef<boolean>(false);
   const conversationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isPausedRef = useRef<boolean>(false); // Track if wake word detection is temporarily paused
   const { toast } = useToast();
 
   const startWakeWordListening = useCallback((onMessageDetected: (message: string) => void) => {
@@ -49,6 +50,13 @@ export function useWakeWordSpeech() {
           console.log(`Processing transcript: "${transcript}"`);
           console.log(`Has Bertha wake word: ${hasBerthaWakeWord}`);
           console.log(`Is in conversation mode: ${isInConversationMode}`);
+          console.log(`Is paused: ${isPausedRef.current}`);
+          
+          // Skip processing if wake word detection is paused (e.g., during speech synthesis)
+          if (isPausedRef.current) {
+            console.log('⏸️ Wake word detection paused - ignoring transcript');
+            return;
+          }
           
           if (transcript.length > 2 && (hasBerthaWakeWord || isInConversationMode)) {
             let messageToSend = '';
@@ -228,10 +236,22 @@ export function useWakeWordSpeech() {
     }
   }, []);
 
+  const pauseWakeWordDetection = useCallback(() => {
+    console.log('⏸️ Pausing wake word detection');
+    isPausedRef.current = true;
+  }, []);
+
+  const resumeWakeWordDetection = useCallback(() => {
+    console.log('▶️ Resuming wake word detection');
+    isPausedRef.current = false;
+  }, []);
+
   return {
     isWakeWordListening,
     startWakeWordListening,
     stopWakeWordListening,
-    clearConversationMode
+    clearConversationMode,
+    pauseWakeWordDetection,
+    resumeWakeWordDetection
   };
 }

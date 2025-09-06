@@ -68,12 +68,20 @@ export function useSpeech() {
         
         utterance.onstart = () => {
           setIsSpeaking(true);
-          console.log(`Speaking with voice: ${selectedVoice ? selectedVoice.name : 'default'} (${selectedVoice ? selectedVoice.lang : 'default'})`);
+          console.log(`🔊 Speaking with voice: ${selectedVoice ? selectedVoice.name : 'default'} - PAUSING wake word detection`);
+          // Signal to pause wake word detection while speaking
+          if (onAutoSendRef.current) {
+            onAutoSendRef.current();
+          }
         };
         
         utterance.onend = () => {
           setIsSpeaking(false);
-          console.log('Speech synthesis completed');
+          console.log('🔇 Speech synthesis completed - RESUMING wake word detection');
+          // Signal to resume wake word detection after speaking
+          if (onWakeWordDetectedRef.current) {
+            onWakeWordDetectedRef.current();
+          }
         };
         
         utterance.onerror = (event) => {
