@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { performNLPAnalysis, type NLPAnalysis } from "./nlp";
 
 // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
 const openai = new OpenAI({ 
@@ -10,19 +11,46 @@ export interface ChatResponse {
   reasoning?: string;
   searchUsed?: boolean;
   translationUsed?: boolean;
+  nlpAnalysis?: NLPAnalysis;
 }
 
 export async function generateChatResponse(
   userInput: string,
   conversationHistory: Array<{ role: string; content: string }>,
   language: string = "en",
-  searchResults?: string
+  searchResults?: string,
+  includeNLP: boolean = true
 ): Promise<ChatResponse> {
   try {
+    // Perform NLP analysis on the user's message
+    let nlpAnalysis: NLPAnalysis | undefined;
+    if (includeNLP) {
+      nlpAnalysis = await performNLPAnalysis(userInput, conversationHistory);
+      
+      // Use detected language if not explicitly provided
+      if (language === "en" && nlpAnalysis.language !== "en") {
+        language = nlpAnalysis.language;
+      }
+    }
+
     let systemPrompt = `You are Bertha, an intelligent AI assistant. You are helpful, knowledgeable, and conversational. 
     Always provide thoughtful and detailed responses. If web search results are provided, incorporate them naturally into your response.
     
     Response language: ${language === "en" ? "English" : `Translate your response to language code: ${language}`}`;
+
+    // Enhance system prompt with NLP insights
+    if (nlpAnalysis) {
+      systemPrompt += `\n\nContext Analysis:
+      - User Intent: ${nlpAnalysis.intent}
+      - Conversation Topic: ${nlpAnalysis.context.currentTopic}
+      - User Sentiment: ${nlpAnalysis.sentiment.sentiment} (${nlpAnalysis.sentiment.confidence.toFixed(2)} confidence)
+      - Conversation Tone: ${nlpAnalysis.context.conversationTone}
+      - Urgency Level: ${nlpAnalysis.context.urgency}
+      - Key Topics: ${nlpAnalysis.keywords.join(", ")}
+      
+      Respond appropriately based on this analysis. ${nlpAnalysis.requiresAction ? "This message requires action or assistance." : ""}
+      ${nlpAnalysis.sentiment.emotions.length > 0 ? `User emotions detected: ${nlpAnalysis.sentiment.emotions.join(", ")}` : ""}`;
+    }
 
     if (searchResults) {
       systemPrompt += `\n\nWeb search results for context:\n${searchResults}`;
@@ -48,7 +76,8 @@ export async function generateChatResponse(
     return {
       content,
       searchUsed: !!searchResults,
-      translationUsed: language !== "en"
+      translationUsed: language !== "en",
+      nlpAnalysis
     };
   } catch (error) {
     console.error("OpenAI API error:", error);
