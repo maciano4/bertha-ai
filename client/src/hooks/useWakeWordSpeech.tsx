@@ -43,9 +43,16 @@ export function useWakeWordSpeech() {
           
           // Check if "bertha" is mentioned OR we're in conversation mode
           // Only process transcripts with meaningful content (more than 2 characters)
-          if (transcript.length > 2 && (transcript.includes('bertha') || conversationModeRef.current)) {
+          const hasBerthaWakeWord = transcript.includes('bertha');
+          const isInConversationMode = conversationModeRef.current;
+          
+          console.log(`Processing transcript: "${transcript}"`);
+          console.log(`Has Bertha wake word: ${hasBerthaWakeWord}`);
+          console.log(`Is in conversation mode: ${isInConversationMode}`);
+          
+          if (transcript.length > 2 && (hasBerthaWakeWord || isInConversationMode)) {
             let messageToSend = '';
-            let isNewConversation = transcript.includes('bertha');
+            let isNewConversation = hasBerthaWakeWord;
             
             if (isNewConversation) {
               console.log('Wake word "Bertha" detected!');
@@ -97,20 +104,27 @@ export function useWakeWordSpeech() {
               
             } else {
               // We're in conversation mode - accept any message
-              console.log('Conversation mode - processing follow-up:', transcript);
+              console.log('🗣️ CONVERSATION MODE - Processing follow-up:', transcript);
               messageToSend = transcript.trim();
               
-              // Extend conversation mode
+              // Reset conversation timeout
               if (conversationTimeoutRef.current) {
                 clearTimeout(conversationTimeoutRef.current);
               }
               conversationTimeoutRef.current = setTimeout(() => {
                 conversationModeRef.current = false;
-                console.log('Conversation mode ended - say Bertha to reactivate');
+                console.log('❌ Conversation mode ended - say Bertha to reactivate');
+                toast({
+                  title: "Conversation Paused",
+                  description: "Say 'Bertha' to start chatting again",
+                  duration: 3000
+                });
               }, 120000); // 2 minutes for follow-ups too
             }
             
             if (messageToSend && messageToSend.length > 1) {
+              console.log(`📤 SENDING MESSAGE: "${messageToSend}" (New conversation: ${isNewConversation})`);
+              
               // Show confirmation
               toast({
                 title: isNewConversation ? "Wake Word Detected!" : "Follow-up Message!",
@@ -120,7 +134,10 @@ export function useWakeWordSpeech() {
               
               // Send the message
               if (onMessageDetectedRef.current) {
+                console.log('✅ Calling onMessageDetected with:', messageToSend);
                 onMessageDetectedRef.current(messageToSend);
+              } else {
+                console.error('❌ onMessageDetectedRef.current is null!');
               }
             } else if (isNewConversation) {
               console.log('No meaningful message found');
