@@ -79,43 +79,58 @@ export function useSpeech() {
       setIsListening(true);
     };
 
+    let hasSpokenText = false;
+    
     recognition.onresult = (event: any) => {
       let finalTranscript = '';
+      let interimTranscript = '';
       
       // Handle both interim and final results
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
+        const transcript = result[0].transcript;
+        
         if (result.isFinal) {
-          finalTranscript += result[0].transcript;
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
         }
       }
       
+      // Update the input with final results
       if (finalTranscript.trim()) {
         onResult(finalTranscript);
+        hasSpokenText = true;
         
-        // If auto-send is enabled, start silence detection
-        if (autoSend && onAutoSendRef.current) {
-          // Clear existing timer
-          if (silenceTimerRef.current) {
-            clearTimeout(silenceTimerRef.current);
-          }
-          
-          // Set new timer for silence detection
-          silenceTimerRef.current = setTimeout(() => {
-            try {
-              // Stop listening and auto-send
-              if (recognitionRef.current) {
-                recognitionRef.current.stop();
-              }
-              if (onAutoSendRef.current) {
-                onAutoSendRef.current();
-                onAutoSendRef.current = null;
-              }
-            } catch (error) {
-              console.error('Auto-send error:', error);
-            }
-          }, silenceTimeout);
+        console.log('Final speech result:', finalTranscript);
+      }
+      
+      // If auto-send is enabled and we have spoken text, start/reset silence timer
+      if (autoSend && onAutoSendRef.current && hasSpokenText) {
+        // Clear existing timer
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current);
         }
+        
+        console.log('Starting silence timer for auto-send...');
+        
+        // Set new timer for silence detection
+        silenceTimerRef.current = setTimeout(() => {
+          try {
+            console.log('Silence detected - auto-sending message');
+            // Stop listening and auto-send
+            if (recognitionRef.current) {
+              recognitionRef.current._stopRequested = true;
+              recognitionRef.current.stop();
+            }
+            if (onAutoSendRef.current) {
+              onAutoSendRef.current();
+              onAutoSendRef.current = null;
+            }
+          } catch (error) {
+            console.error('Auto-send error:', error);
+          }
+        }, silenceTimeout);
       }
     };
 
@@ -139,7 +154,20 @@ export function useSpeech() {
     };
 
     recognition.onend = () => {
+      console.log('Speech recognition ended');
       setIsListening(false);
+      
+      // If we haven't manually stopped and we're in auto-send mode with spoken text,
+      // trigger auto-send immediately
+      if (!recognition._stopRequested && autoSend && onAutoSendRef.current && hasSpokenText) {
+        console.log('Speech ended naturally - triggering auto-send');
+        setTimeout(() => {
+          if (onAutoSendRef.current) {
+            onAutoSendRef.current();
+            onAutoSendRef.current = null;
+          }
+        }, 100);
+      }
       
       // Clear any pending silence timer
       if (silenceTimerRef.current) {
@@ -147,8 +175,10 @@ export function useSpeech() {
         silenceTimerRef.current = null;
       }
       
-      // Reset auto-send callback on end
-      onAutoSendRef.current = null;
+      // Reset auto-send callback on end if not already cleared
+      if (!recognition._stopRequested) {
+        onAutoSendRef.current = null;
+      }
     };
 
     recognitionRef.current = recognition;

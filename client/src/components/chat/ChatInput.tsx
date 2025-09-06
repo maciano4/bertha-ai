@@ -74,8 +74,10 @@ export default function ChatInput({ onSendMessage, isLoading, language, speechEn
 
       // Auto-send callback for when speech recognition detects silence
       const handleAutoSend = () => {
+        console.log('Auto-send triggered, current message:', message);
         const currentMessage = message.trim();
         if (currentMessage) {
+          console.log('Sending message:', currentMessage);
           onSendMessage(currentMessage);
           setMessage("");
           setCharCount(0);
@@ -83,6 +85,8 @@ export default function ChatInput({ onSendMessage, isLoading, language, speechEn
           if (textareaRef.current) {
             textareaRef.current.style.height = "auto";
           }
+        } else {
+          console.log('No message to send');
         }
       };
 
@@ -97,7 +101,7 @@ export default function ChatInput({ onSendMessage, isLoading, language, speechEn
         languageMap[language] || "en-US",
         speechEnabled, // Enable auto-send when speech is enabled
         handleAutoSend, // Callback for auto-sending
-        3000 // 3 seconds of silence before auto-send (increased for better UX)
+        2000 // 2 seconds of silence before auto-send
       );
     }
   };
