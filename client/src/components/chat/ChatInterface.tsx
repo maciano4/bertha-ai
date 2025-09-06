@@ -110,7 +110,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
             message={{
               id: "welcome",
               role: "assistant",
-              content: settings.wakeWordEnabled ? "Hello! I'm Bertha, your intelligent AI assistant. Just say 'Bertha' followed by your message and I'll respond automatically. You can also type or click the microphone button. How can I assist you today?" : "Hello! I'm Bertha, your intelligent AI assistant. I can help you with conversations, web searches, translations, and much more. How can I assist you today?",
+              content: settings.wakeWordEnabled ? "Ah, hello there, my dear child! I am Bertha, your wise grandmother from the beautiful lands of Cameroon. Just say 'Bertha' followed by whatever is on your heart, and I will listen with all the love of a grandmother. You can also type or click the small microphone if you prefer. Now then, what brings you to visit with old Bertha today?" : "Hello, my precious child! I am Bertha, a loving grandmother from Cameroon who has seen many seasons and learned much along the way. I am here to listen, to share stories, to offer wisdom, and to care for you as a grandmother would. What is on your heart today, dear one?",
               timestamp: new Date()
             }}
             showAvatar

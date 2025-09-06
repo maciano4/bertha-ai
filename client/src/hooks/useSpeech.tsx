@@ -12,15 +12,58 @@ export function useSpeech() {
   const onWakeWordDetectedRef = useRef<(() => void) | null>(null);
   const { toast } = useToast();
 
-  // Text-to-Speech
-  const speak = useCallback((text: string, rate: number = 1) => {
+  // Text-to-Speech with Cameroon grandmother voice characteristics
+  const speak = useCallback((text: string, rate: number = 0.8) => {
     if ('speechSynthesis' in window) {
       // Cancel any ongoing speech
       window.speechSynthesis.cancel();
       
+      // Get available voices
+      const voices = window.speechSynthesis.getVoices();
+      
+      // Find the best voice for a Cameroon grandmother
+      // Priority: African/French accented female voices, then any warm female voice
+      let selectedVoice = voices.find(voice => 
+        voice.name.toLowerCase().includes('french') && voice.name.toLowerCase().includes('female')
+      ) || voices.find(voice => 
+        (voice.lang.startsWith('fr') || voice.lang.startsWith('en-za') || voice.lang.startsWith('en-ng')) && 
+        voice.name.toLowerCase().includes('female')
+      ) || voices.find(voice => 
+        voice.name.toLowerCase().includes('female') && !voice.name.toLowerCase().includes('male')
+      ) || voices.find(voice => 
+        voice.name.toLowerCase().includes('woman') || voice.name.toLowerCase().includes('lady')
+      );
+      
+      // Add warm, caring grandmother phrases occasionally
+      const grandmotherPhrases = [
+        "my dear child", "sweetheart", "little one", "my precious", 
+        "child of my heart", "dear one"
+      ];
+      
+      // Occasionally add grandmother warmth to responses
+      if (Math.random() < 0.3 && text.length > 50) {
+        const phrase = grandmotherPhrases[Math.floor(Math.random() * grandmotherPhrases.length)];
+        text = `${phrase}, ${text}`;
+      }
+      
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = rate;
-      utterance.onstart = () => setIsSpeaking(true);
+      
+      // Set voice if found
+      if (selectedVoice) {
+        utterance.voice = selectedVoice;
+      }
+      
+      // Grandmother voice characteristics
+      utterance.rate = rate; // Slower, thoughtful speech
+      utterance.pitch = 0.9; // Slightly lower pitch for age
+      utterance.volume = 0.9; // Warm, gentle volume
+      
+      // Add some regional speech patterns for Cameroon influence
+      utterance.onstart = () => {
+        setIsSpeaking(true);
+        console.log(`Speaking with voice: ${selectedVoice ? selectedVoice.name : 'default'} (${selectedVoice ? selectedVoice.lang : 'default'})`);
+      };
+      
       utterance.onend = () => setIsSpeaking(false);
       utterance.onerror = () => {
         setIsSpeaking(false);
