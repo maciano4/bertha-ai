@@ -237,32 +237,39 @@ export function useWakeWordSpeech() {
   }, []);
 
   const pauseWakeWordDetection = useCallback(() => {
-    console.log('⏸️ Pausing wake word detection and clearing recognition');
+    console.log('🛑 STOPPING wake word detection completely');
     isPausedRef.current = true;
     
-    // Stop and restart recognition to clear any buffered audio
+    // Completely stop recognition - don't restart until resume
     if (recognitionRef.current) {
       try {
+        recognitionRef.current._stopRequested = true;
         recognitionRef.current.stop();
-        setTimeout(() => {
-          if (recognitionRef.current && !recognitionRef.current._stopRequested) {
-            recognitionRef.current.start();
-            console.log('🔄 Recognition cleared and restarted during pause');
-          }
-        }, 100);
+        console.log('🔇 Speech recognition STOPPED during Bertha speech');
       } catch (error) {
-        console.log('Recognition pause handled');
+        console.log('Recognition stop handled');
       }
     }
   }, []);
 
   const resumeWakeWordDetection = useCallback(() => {
-    console.log('▶️ Resuming wake word detection with cooldown');
-    // Add a longer cooldown to ensure all speech synthesis audio is finished
+    console.log('⏱️ Starting 3-second cooldown before resuming wake word detection');
+    
+    // Longer cooldown to ensure all speech synthesis audio is completely finished
     setTimeout(() => {
       isPausedRef.current = false;
-      console.log('✅ Wake word detection fully resumed after cooldown');
-    }, 2000); // 2 second cooldown
+      
+      // Restart speech recognition completely
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current._stopRequested = false;
+          recognitionRef.current.start();
+          console.log('🎤 Wake word detection RESTARTED after cooldown');
+        } catch (error) {
+          console.log('Recognition restart handled');
+        }
+      }
+    }, 3000); // 3 second cooldown
   }, []);
 
   return {
