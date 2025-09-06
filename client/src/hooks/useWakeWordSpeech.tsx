@@ -237,13 +237,32 @@ export function useWakeWordSpeech() {
   }, []);
 
   const pauseWakeWordDetection = useCallback(() => {
-    console.log('⏸️ Pausing wake word detection');
+    console.log('⏸️ Pausing wake word detection and clearing recognition');
     isPausedRef.current = true;
+    
+    // Stop and restart recognition to clear any buffered audio
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+        setTimeout(() => {
+          if (recognitionRef.current && !recognitionRef.current._stopRequested) {
+            recognitionRef.current.start();
+            console.log('🔄 Recognition cleared and restarted during pause');
+          }
+        }, 100);
+      } catch (error) {
+        console.log('Recognition pause handled');
+      }
+    }
   }, []);
 
   const resumeWakeWordDetection = useCallback(() => {
-    console.log('▶️ Resuming wake word detection');
-    isPausedRef.current = false;
+    console.log('▶️ Resuming wake word detection with cooldown');
+    // Add a longer cooldown to ensure all speech synthesis audio is finished
+    setTimeout(() => {
+      isPausedRef.current = false;
+      console.log('✅ Wake word detection fully resumed after cooldown');
+    }, 2000); // 2 second cooldown
   }, []);
 
   return {
