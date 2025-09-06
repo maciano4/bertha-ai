@@ -3,6 +3,8 @@ import { useChat } from "@/hooks/useChat";
 import { useSpeech } from "@/hooks/useSpeech";
 import MessageBubble from "./MessageBubble";
 import ChatInput from "./ChatInput";
+import { NLPInsights } from "@/components/nlp/NLPInsights";
+import type { MessageMetadata } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Volume2, VolumeX } from "lucide-react";
 
@@ -15,7 +17,8 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
   const [settings, setSettings] = useState({
     language: "en",
     speechEnabled: false,
-    searchEnabled: true
+    searchEnabled: true,
+    showNLPInsights: false
   });
 
   const { messages, isLoading, sendMessage, messagesEndRef, scrollToBottom } = useChat(conversationId);
@@ -92,12 +95,22 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
 
         {/* Chat Messages */}
         {messages.map((message, index) => (
-          <MessageBubble
-            key={`${message.id}-${index}`}
-            message={message}
-            showAvatar={message.role === "assistant"}
-            data-testid={`message-${message.role}-${message.id}`}
-          />
+          <div key={`${message.id}-${index}`}>
+            <MessageBubble
+              message={message}
+              showAvatar={message.role === "assistant"}
+              data-testid={`message-${message.role}-${message.id}`}
+            />
+            {/* Show NLP insights for user messages if available */}
+            {message.role === "user" && (message.metadata as MessageMetadata)?.nlpAnalysis && settings.showNLPInsights && (
+              <div className="ml-4 mt-2">
+                <NLPInsights 
+                  analysis={(message.metadata as MessageMetadata).nlpAnalysis!} 
+                  className="max-w-sm"
+                />
+              </div>
+            )}
+          </div>
         ))}
 
         {/* Typing Indicator */}

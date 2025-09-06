@@ -70,3 +70,35 @@ export type InsertMessage = z.infer<typeof insertMessageSchema>;
 export type Message = typeof messages.$inferSelect;
 export type InsertUserSettings = z.infer<typeof insertUserSettingsSchema>;
 export type UserSettings = typeof userSettings.$inferSelect;
+
+// NLP Analysis types
+export interface NLPAnalysis {
+  intent: string;
+  entities: Array<{ type: string; value: string; confidence: number }>;
+  sentiment: {
+    sentiment: string;
+    confidence: number;
+    emotions: string[];
+  };
+  context: {
+    currentTopic: string;
+    conversationTone: string;
+    urgency: string;
+  };
+  language: string;
+  keywords: string[];
+  summary: string;
+  requiresAction: boolean;
+}
+
+// Extended message metadata interface
+export interface MessageMetadata {
+  searchUsed?: boolean;
+  translationUsed?: boolean;
+  searchResults?: string;
+  nlpAnalysis?: NLPAnalysis;
+  intent?: string;
+  sentiment?: any;
+  entities?: any[];
+  keywords?: string[];
+}

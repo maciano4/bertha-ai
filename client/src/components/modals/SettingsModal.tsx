@@ -24,6 +24,7 @@ interface SettingsData {
   voiceSpeed: string;
   saveHistory: boolean;
   analytics: boolean;
+  showNLPInsights: boolean;
 }
 
 export default function SettingsModal({ isOpen, onClose, onBackgroundChange }: SettingsModalProps) {
@@ -33,7 +34,8 @@ export default function SettingsModal({ isOpen, onClose, onBackgroundChange }: S
     searchEnabled: true,
     voiceSpeed: "1",
     saveHistory: true,
-    analytics: false
+    analytics: false,
+    showNLPInsights: false
   });
   
   const { toast } = useToast();
@@ -105,7 +107,8 @@ export default function SettingsModal({ isOpen, onClose, onBackgroundChange }: S
       searchEnabled: true,
       voiceSpeed: "1",
       saveHistory: true,
-      analytics: false
+      analytics: false,
+      showNLPInsights: false
     };
     setSettings(defaults);
     localStorage.setItem("bertha-settings", JSON.stringify(defaults));
@@ -266,6 +269,15 @@ export default function SettingsModal({ isOpen, onClose, onBackgroundChange }: S
                   checked={settings.analytics}
                   onCheckedChange={(checked) => updateSettings({ analytics: checked })}
                   data-testid="switch-analytics"
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <Label className="text-sm text-muted-foreground">Show AI Understanding</Label>
+                <Switch
+                  checked={settings.showNLPInsights}
+                  onCheckedChange={(checked) => updateSettings({ showNLPInsights: checked })}
+                  data-testid="switch-nlp-insights"
                 />
               </div>
             </div>
