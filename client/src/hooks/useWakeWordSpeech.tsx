@@ -5,6 +5,8 @@ export function useWakeWordSpeech() {
   const [isWakeWordListening, setIsWakeWordListening] = useState(false);
   const recognitionRef = useRef<any>(null);
   const onMessageDetectedRef = useRef<((message: string) => void) | null>(null);
+  const conversationModeRef = useRef<boolean>(false);
+  const conversationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const { toast } = useToast();
 
   const startWakeWordListening = useCallback((onMessageDetected: (message: string) => void) => {
@@ -39,51 +41,74 @@ export function useWakeWordSpeech() {
           const transcript = result[0].transcript.toLowerCase().trim();
           console.log('Wake word detection heard:', transcript);
           
-          // Check if "bertha" is mentioned anywhere in the transcript
-          if (transcript.includes('bertha')) {
-            console.log('Wake word "Bertha" detected!');
+          // Check if "bertha" is mentioned OR we're in conversation mode
+          if (transcript.includes('bertha') || conversationModeRef.current) {
+            let messageToSend = '';
+            let isNewConversation = transcript.includes('bertha');
             
-            // Find the index of "bertha" in the transcript
-            const berthaIndex = transcript.indexOf('bertha');
-            const afterBertha = transcript.substring(berthaIndex + 6).trim(); // 6 = length of 'bertha'
-            
-            if (afterBertha && afterBertha.length > 1) {
-              console.log('Extracted message after Bertha:', afterBertha);
+            if (isNewConversation) {
+              console.log('Wake word "Bertha" detected!');
               
+              // Find the index of "bertha" in the transcript
+              const berthaIndex = transcript.indexOf('bertha');
+              const afterBertha = transcript.substring(berthaIndex + 6).trim(); // 6 = length of 'bertha'
+              
+              if (afterBertha && afterBertha.length > 1) {
+                console.log('Extracted message after Bertha:', afterBertha);
+                messageToSend = afterBertha;
+              } else {
+                // If no message after bertha, use the whole transcript except "bertha"
+                const cleanTranscript = transcript.replace(/bertha/g, '').trim();
+                if (cleanTranscript && cleanTranscript.length > 1) {
+                  console.log('Using full transcript without Bertha word:', cleanTranscript);
+                  messageToSend = cleanTranscript;
+                }
+              }
+              
+              // Enable conversation mode for 90 seconds
+              conversationModeRef.current = true;
+              if (conversationTimeoutRef.current) {
+                clearTimeout(conversationTimeoutRef.current);
+              }
+              conversationTimeoutRef.current = setTimeout(() => {
+                conversationModeRef.current = false;
+                console.log('Conversation mode ended - say Bertha to reactivate');
+              }, 90000);
+              
+            } else {
+              // We're in conversation mode - accept any message
+              console.log('Conversation mode - processing follow-up:', transcript);
+              messageToSend = transcript;
+              
+              // Extend conversation mode
+              if (conversationTimeoutRef.current) {
+                clearTimeout(conversationTimeoutRef.current);
+              }
+              conversationTimeoutRef.current = setTimeout(() => {
+                conversationModeRef.current = false;
+                console.log('Conversation mode ended - say Bertha to reactivate');
+              }, 90000);
+            }
+            
+            if (messageToSend && messageToSend.length > 1) {
               // Show confirmation
               toast({
-                title: "Message Received!",
-                description: `📤 "${afterBertha.slice(0, 50)}${afterBertha.length > 50 ? '...' : ''}"`,
+                title: isNewConversation ? "Wake Word Detected!" : "Follow-up Message!",
+                description: `📤 "${messageToSend.slice(0, 50)}${messageToSend.length > 50 ? '...' : ''}"`,
                 duration: 2000
               });
               
               // Send the message
               if (onMessageDetectedRef.current) {
-                onMessageDetectedRef.current(afterBertha);
+                onMessageDetectedRef.current(messageToSend);
               }
-            } else {
-              // If no message after bertha, use the whole transcript except "bertha"
-              const cleanTranscript = transcript.replace(/bertha/g, '').trim();
-              if (cleanTranscript && cleanTranscript.length > 1) {
-                console.log('Using full transcript without Bertha word:', cleanTranscript);
-                
-                toast({
-                  title: "Message Received!",
-                  description: `📤 "${cleanTranscript.slice(0, 50)}${cleanTranscript.length > 50 ? '...' : ''}"`,
-                  duration: 2000
-                });
-                
-                if (onMessageDetectedRef.current) {
-                  onMessageDetectedRef.current(cleanTranscript);
-                }
-              } else {
-                console.log('No meaningful message found');
-                toast({
-                  title: "Try Again",
-                  description: "Say 'Bertha' followed by your message",
-                  duration: 2000
-                });
-              }
+            } else if (isNewConversation) {
+              console.log('No meaningful message found');
+              toast({
+                title: "Try Again",
+                description: "Say 'Bertha' followed by your message",
+                duration: 2000
+              });
             }
           }
         }
@@ -136,6 +161,14 @@ export function useWakeWordSpeech() {
       setIsWakeWordListening(false);
       console.log('Wake word detection stopped');
     }
+    
+    // Clear conversation mode
+    conversationModeRef.current = false;
+    if (conversationTimeoutRef.current) {
+      clearTimeout(conversationTimeoutRef.current);
+      conversationTimeoutRef.current = null;
+    }
+    
     onMessageDetectedRef.current = null;
   }, []);
 
