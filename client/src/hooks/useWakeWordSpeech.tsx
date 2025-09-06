@@ -39,52 +39,50 @@ export function useWakeWordSpeech() {
           const transcript = result[0].transcript.toLowerCase().trim();
           console.log('Wake word detection heard:', transcript);
           
-          // Check if "bertha" is at the beginning of the transcript
-          if (transcript.startsWith('bertha')) {
-            console.log('Wake word "Bertha" detected at start!');
+          // Check if "bertha" is mentioned anywhere in the transcript
+          if (transcript.includes('bertha')) {
+            console.log('Wake word "Bertha" detected!');
             
-            // Extract the message that comes after "bertha"
-            const message = transcript.substring(6).trim(); // 6 = length of 'bertha'
-            
-            if (message && message.length > 1) {
-              console.log('Extracted message after Bertha:', message);
-              
-              // Show confirmation
-              toast({
-                title: "Message Received!",
-                description: `📤 "${message.slice(0, 50)}${message.length > 50 ? '...' : ''}"`,
-                duration: 2000
-              });
-              
-              // Send the message
-              if (onMessageDetectedRef.current) {
-                onMessageDetectedRef.current(message);
-              }
-            } else {
-              console.log('No message found after Bertha');
-              toast({
-                title: "Try Again",
-                description: "Say 'Bertha' followed by your message",
-                duration: 2000
-              });
-            }
-          } else if (transcript.includes('bertha')) {
-            // If "bertha" is mentioned but not at the start
+            // Find the index of "bertha" in the transcript
             const berthaIndex = transcript.indexOf('bertha');
-            const beforeBertha = transcript.substring(0, berthaIndex).trim();
-            const afterBertha = transcript.substring(berthaIndex + 6).trim();
+            const afterBertha = transcript.substring(berthaIndex + 6).trim(); // 6 = length of 'bertha'
             
             if (afterBertha && afterBertha.length > 1) {
-              console.log('Found Bertha in middle, message:', afterBertha);
+              console.log('Extracted message after Bertha:', afterBertha);
               
+              // Show confirmation
               toast({
                 title: "Message Received!",
                 description: `📤 "${afterBertha.slice(0, 50)}${afterBertha.length > 50 ? '...' : ''}"`,
                 duration: 2000
               });
               
+              // Send the message
               if (onMessageDetectedRef.current) {
                 onMessageDetectedRef.current(afterBertha);
+              }
+            } else {
+              // If no message after bertha, use the whole transcript except "bertha"
+              const cleanTranscript = transcript.replace(/bertha/g, '').trim();
+              if (cleanTranscript && cleanTranscript.length > 1) {
+                console.log('Using full transcript without Bertha word:', cleanTranscript);
+                
+                toast({
+                  title: "Message Received!",
+                  description: `📤 "${cleanTranscript.slice(0, 50)}${cleanTranscript.length > 50 ? '...' : ''}"`,
+                  duration: 2000
+                });
+                
+                if (onMessageDetectedRef.current) {
+                  onMessageDetectedRef.current(cleanTranscript);
+                }
+              } else {
+                console.log('No meaningful message found');
+                toast({
+                  title: "Try Again",
+                  description: "Say 'Bertha' followed by your message",
+                  duration: 2000
+                });
               }
             }
           }
