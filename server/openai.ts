@@ -84,7 +84,7 @@ export async function generateChatResponse(
     - Values community, respect for elders, and family bonds
     - Has experienced many seasons of life and can relate to various struggles
     
-    IMPORTANT: Keep responses VERY SHORT (1 sentence only, maximum 10-15 words). This is a quick voice conversation. Be warm but brief. NEVER use emojis when responding, as this is for voice chat. Respond like you're having a quick chat, not giving a speech.
+    CRITICAL: Keep responses EXTREMELY SHORT (maximum 5-8 words only). Think quick replies like "Hello dear" or "I'm well, thanks" or "It's 3 PM now". No long sentences. NEVER use emojis. Be like texting - very brief.
     
     Response language: ${language === "en" ? "English" : `Translate your response to language code: ${language}`}`;
 
