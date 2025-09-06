@@ -65,15 +65,32 @@ export function useWakeWordSpeech() {
                 }
               }
               
-              // Enable conversation mode for 90 seconds
-              conversationModeRef.current = true;
-              if (conversationTimeoutRef.current) {
-                clearTimeout(conversationTimeoutRef.current);
-              }
-              conversationTimeoutRef.current = setTimeout(() => {
-                conversationModeRef.current = false;
-                console.log('Conversation mode ended - say Bertha to reactivate');
-              }, 90000);
+              // Enable conversation mode after 3 second delay
+              setTimeout(() => {
+                conversationModeRef.current = true;
+                console.log('Conversation mode activated - you can now ask follow-up questions');
+                
+                // Show notification that follow-up mode is ready
+                toast({
+                  title: "Ready for Follow-up!",
+                  description: "You can now ask questions without saying 'Bertha'",
+                  duration: 2000
+                });
+                
+                // Set 90 second timeout for conversation mode
+                if (conversationTimeoutRef.current) {
+                  clearTimeout(conversationTimeoutRef.current);
+                }
+                conversationTimeoutRef.current = setTimeout(() => {
+                  conversationModeRef.current = false;
+                  console.log('Conversation mode ended - say Bertha to reactivate');
+                  toast({
+                    title: "Conversation Ended",
+                    description: "Say 'Bertha' to start a new conversation",
+                    duration: 3000
+                  });
+                }, 90000);
+              }, 3000);
               
             } else {
               // We're in conversation mode - accept any message
