@@ -40,7 +40,7 @@ export async function generateChatResponse(
     const response = await openai.chat.completions.create({
       model: "gpt-5",
       messages,
-      max_tokens: 1000,
+      max_completion_tokens: 1000,
       temperature: 0.7,
     });
 
@@ -73,7 +73,7 @@ export async function translateText(text: string, targetLanguage: string): Promi
           content: text
         }
       ],
-      max_tokens: 500,
+      max_completion_tokens: 500,
       temperature: 0.3,
     });
 
@@ -105,7 +105,7 @@ export async function analyzeImage(base64Image: string): Promise<string> {
           ],
         },
       ],
-      max_tokens: 500,
+      max_completion_tokens: 500,
     });
 
     return response.choices[0].message.content || "I couldn't analyze this image.";
