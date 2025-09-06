@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useChat } from "@/hooks/useChat";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useWakeWordSpeech } from "@/hooks/useWakeWordSpeech";
@@ -71,14 +71,23 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     setWakeWordCallbacks(pauseWakeWordDetection, resumeWakeWordDetection);
   }, [setWakeWordCallbacks, pauseWakeWordDetection, resumeWakeWordDetection]);
 
-  // Handle AI response speech 
+  // Handle AI response speech with deduplication
+  const lastSpokenMessageRef = useRef<string>('');
   useEffect(() => {
-    if (!settings.speechEnabled || !messages.length) return;
+    if (!settings.speechEnabled || !messages.length || isLoading) return;
 
     const lastMessage = messages[messages.length - 1];
-    if (lastMessage.role === "assistant" && !isLoading) {
-      // Speech synthesis will automatically pause/resume wake word detection via callbacks
-      speak(lastMessage.content);
+    if (lastMessage.role === "assistant") {
+      // Prevent duplicate speech synthesis for the same message
+      const messageKey = `${lastMessage.content}-${messages.length}`;
+      if (lastSpokenMessageRef.current !== messageKey) {
+        lastSpokenMessageRef.current = messageKey;
+        console.log('🎙️ Starting speech synthesis for:', lastMessage.content.slice(0, 50) + '...');
+        // Small delay to ensure message is fully processed
+        setTimeout(() => {
+          speak(lastMessage.content);
+        }, 100);
+      }
     }
   }, [messages, settings.speechEnabled, speak, isLoading]);
 
