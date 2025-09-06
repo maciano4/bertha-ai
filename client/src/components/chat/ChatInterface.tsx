@@ -17,7 +17,7 @@ interface ChatInterfaceProps {
 export default function ChatInterface({ conversationId, onConversationStart }: ChatInterfaceProps) {
   const [settings, setSettings] = useState({
     language: "en",
-    speechEnabled: false,
+    speechEnabled: true, // Enable speech by default for Bertha
     searchEnabled: true,
     showNLPInsights: false,
     wakeWordEnabled: true

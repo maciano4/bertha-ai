@@ -18,14 +18,24 @@ export function useSpeech() {
       // Cancel any ongoing speech
       window.speechSynthesis.cancel();
       
-      // Get available voices
+      // Get available voices with proper loading handling
       let voices = window.speechSynthesis.getVoices();
       
-      // If no voices loaded yet, wait a moment and try again
+      // If no voices loaded yet, force a reload and wait
       if (voices.length === 0) {
+        // Trigger voice loading
+        window.speechSynthesis.onvoiceschanged = () => {
+          voices = window.speechSynthesis.getVoices();
+          console.log('Voices reloaded:', voices.length);
+        };
+        
+        // Also try after a short delay
         setTimeout(() => {
           voices = window.speechSynthesis.getVoices();
-        }, 100);
+          if (voices.length === 0) {
+            console.warn('No voices available for speech synthesis');
+          }
+        }, 200);
       }
       
       console.log('Available voices:', voices.map(v => `${v.name} (${v.lang})`));
@@ -92,16 +102,22 @@ export function useSpeech() {
         console.log(`Speaking with voice: ${selectedVoice ? selectedVoice.name : 'default'} (${selectedVoice ? selectedVoice.lang : 'default'})`);
       };
       
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => {
+      utterance.onend = () => {
         setIsSpeaking(false);
+        console.log('Speech synthesis completed');
+      };
+      
+      utterance.onerror = (event) => {
+        setIsSpeaking(false);
+        console.error('Speech synthesis error:', event.error);
         toast({
-          title: "Speech Error",
-          description: "Failed to speak the text",
+          title: "Speech Error", 
+          description: `Failed to speak: ${event.error}`,
           variant: "destructive"
         });
       };
       
+      console.log('Starting speech synthesis...');
       window.speechSynthesis.speak(utterance);
     } else {
       toast({
