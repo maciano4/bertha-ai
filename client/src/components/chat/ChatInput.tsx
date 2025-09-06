@@ -74,20 +74,30 @@ export default function ChatInput({ onSendMessage, isLoading, language, speechEn
 
       // Auto-send callback for when speech recognition detects silence
       const handleAutoSend = () => {
-        if (message.trim()) {
-          handleSend();
+        const currentMessage = message.trim();
+        if (currentMessage) {
+          onSendMessage(currentMessage);
+          setMessage("");
+          setCharCount(0);
+          
+          if (textareaRef.current) {
+            textareaRef.current.style.height = "auto";
+          }
         }
       };
 
       startListening(
         (transcript) => {
-          setMessage(prev => prev + transcript);
-          setCharCount(prev => prev + transcript.length);
+          const cleanTranscript = transcript.trim();
+          if (cleanTranscript) {
+            setMessage(prev => prev + (prev ? ' ' : '') + cleanTranscript);
+            setCharCount(prev => prev + cleanTranscript.length + (prev ? 1 : 0));
+          }
         }, 
         languageMap[language] || "en-US",
         speechEnabled, // Enable auto-send when speech is enabled
         handleAutoSend, // Callback for auto-sending
-        2000 // 2 seconds of silence before auto-send
+        3000 // 3 seconds of silence before auto-send (increased for better UX)
       );
     }
   };

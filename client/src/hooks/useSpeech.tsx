@@ -65,9 +65,10 @@ export function useSpeech() {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     
-    recognition.continuous = autoSend; // Enable continuous mode for auto-send
-    recognition.interimResults = autoSend; // Enable interim results for better UX
+    recognition.continuous = true; // Always use continuous mode for better reliability
+    recognition.interimResults = true; // Enable interim results for better UX
     recognition.lang = language;
+    recognition.maxAlternatives = 1;
     
     // Store auto-send callback for later use
     if (autoSend && onAutoSend) {
@@ -79,18 +80,18 @@ export function useSpeech() {
     };
 
     recognition.onresult = (event: any) => {
-      let transcript = '';
+      let finalTranscript = '';
       
       // Handle both interim and final results
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         if (result.isFinal) {
-          transcript += result[0].transcript;
+          finalTranscript += result[0].transcript;
         }
       }
       
-      if (transcript) {
-        onResult(transcript);
+      if (finalTranscript.trim()) {
+        onResult(finalTranscript);
         
         // If auto-send is enabled, start silence detection
         if (autoSend && onAutoSendRef.current) {
@@ -101,10 +102,18 @@ export function useSpeech() {
           
           // Set new timer for silence detection
           silenceTimerRef.current = setTimeout(() => {
-            // Stop listening and auto-send
-            recognition.stop();
-            onAutoSendRef.current?.();
-            onAutoSendRef.current = null;
+            try {
+              // Stop listening and auto-send
+              if (recognitionRef.current) {
+                recognitionRef.current.stop();
+              }
+              if (onAutoSendRef.current) {
+                onAutoSendRef.current();
+                onAutoSendRef.current = null;
+              }
+            } catch (error) {
+              console.error('Auto-send error:', error);
+            }
           }, silenceTimeout);
         }
       }
@@ -112,11 +121,21 @@ export function useSpeech() {
 
     recognition.onerror = (event: any) => {
       setIsListening(false);
-      toast({
-        title: "Speech Recognition Error",
-        description: `Error: ${event.error}`,
-        variant: "destructive"
-      });
+      
+      // Clear any pending timers
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+      
+      // Don't show error for 'aborted' - this is normal when stopping manually
+      if (event.error !== 'aborted' && event.error !== 'no-speech') {
+        toast({
+          title: "Speech Recognition Error",
+          description: `Error: ${event.error}. Please try again.`,
+          variant: "destructive"
+        });
+      }
     };
 
     recognition.onend = () => {
@@ -128,15 +147,8 @@ export function useSpeech() {
         silenceTimerRef.current = null;
       }
       
-      // Don't auto-restart if we're in auto-send mode and stopping intentionally
-      if (autoSend && recognition.continuous && !recognition._stopRequested) {
-        // Restart recognition for continuous listening
-        setTimeout(() => {
-          if (recognitionRef.current === recognition && !recognition._stopRequested) {
-            recognition.start();
-          }
-        }, 100);
-      }
+      // Reset auto-send callback on end
+      onAutoSendRef.current = null;
     };
 
     recognitionRef.current = recognition;
