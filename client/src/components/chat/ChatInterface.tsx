@@ -70,29 +70,53 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     }
   }, [messages, settings.speechEnabled, speak, isLoading]);
 
-  // Wake word listening management (stable to prevent unnecessary restarts)
+  // Wake word listening management (run only once on mount)
   useEffect(() => {
-    if (settings.wakeWordEnabled && !isWakeWordListening) {
-      console.log('🎤 Starting wake word listening...');
-      // Start wake word listening with direct message handling
+    if (settings.wakeWordEnabled) {
+      console.log('🎤 Starting wake word listening (initial setup)...');
+      // Start wake word listening with stable message handling
       startWakeWordListening((message: string) => {
         console.log('Wake word message received:', message);
-        handleSendMessage(message);
+        // Create conversation if needed and send message
+        (async () => {
+          if (!conversationId) {
+            try {
+              const response = await fetch("/api/conversations", {
+                method: "POST", 
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: message.slice(0, 50) + "..." })
+              });
+              const newConversation = await response.json();
+              onConversationStart(newConversation.id);
+            } catch (error) {
+              console.error("Failed to create conversation:", error);
+            }
+          }
+          
+          // Send message directly to avoid re-render issues
+          await sendMessage(message, settings);
+        })();
       });
-    } else if (!settings.wakeWordEnabled && isWakeWordListening) {
-      console.log('🔇 Stopping wake word listening...');
-      // Stop wake word listening
-      stopWakeWordListening();
     }
     
-    // Cleanup when component unmounts
+    // Cleanup only on settings change or unmount
     return () => {
       if (isWakeWordListening) {
-        console.log('🧹 Cleanup: stopping wake word listening');
+        console.log('🧹 Settings changed - stopping wake word listening');
+        stopWakeWordListening(true); // Clear conversation mode on settings change
+      }
+    };
+  }, [settings.wakeWordEnabled]); // Only depend on wake word setting
+
+  // Separate cleanup effect that only runs on unmount
+  useEffect(() => {
+    return () => {
+      if (isWakeWordListening) {
+        console.log('🧹 Cleanup on unmount: stopping wake word listening');
         stopWakeWordListening();
       }
     };
-  }, [settings.wakeWordEnabled, isWakeWordListening, startWakeWordListening, stopWakeWordListening, handleSendMessage]);
+  }, []); // Empty dependency array - only runs on mount/unmount
 
   const toggleSpeech = () => {
     if (isSpeaking) {

@@ -193,7 +193,7 @@ export function useWakeWordSpeech() {
     recognition.start();
   }, [toast]);
 
-  const stopWakeWordListening = useCallback(() => {
+  const stopWakeWordListening = useCallback((clearConversation: boolean = true) => {
     if (recognitionRef.current) {
       recognitionRef.current._stopped = true;
       recognitionRef.current.stop();
@@ -201,20 +201,37 @@ export function useWakeWordSpeech() {
       console.log('Wake word detection stopped');
     }
     
-    // Only clear conversation mode when explicitly stopping (not during restarts)
-    console.log('🛑 Explicitly stopping wake word - clearing conversation mode');
+    // Only clear conversation mode when explicitly requested
+    if (clearConversation) {
+      console.log('🛑 Explicitly stopping wake word - clearing conversation mode');
+      conversationModeRef.current = false;
+      if (conversationTimeoutRef.current) {
+        clearTimeout(conversationTimeoutRef.current);
+        conversationTimeoutRef.current = null;
+      }
+    } else {
+      console.log('🔄 Stopping wake word but preserving conversation mode');
+    }
+    
+    // Only clear message handler if clearing conversation
+    if (clearConversation) {
+      onMessageDetectedRef.current = null;
+    }
+  }, []);
+
+  const clearConversationMode = useCallback(() => {
+    console.log('🗑️ Manually clearing conversation mode');
     conversationModeRef.current = false;
     if (conversationTimeoutRef.current) {
       clearTimeout(conversationTimeoutRef.current);
       conversationTimeoutRef.current = null;
     }
-    
-    onMessageDetectedRef.current = null;
   }, []);
 
   return {
     isWakeWordListening,
     startWakeWordListening,
-    stopWakeWordListening
+    stopWakeWordListening,
+    clearConversationMode
   };
 }
