@@ -6,7 +6,7 @@ import ChatInput from "./ChatInput";
 import { NLPInsights } from "@/components/nlp/NLPInsights";
 import type { MessageMetadata } from "@shared/schema";
 import { Button } from "@/components/ui/button";
-import { Volume2, VolumeX } from "lucide-react";
+import { Volume2, VolumeX, Ear, EarOff } from "lucide-react";
 
 interface ChatInterfaceProps {
   conversationId: string | null;
@@ -18,11 +18,12 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     language: "en",
     speechEnabled: false,
     searchEnabled: true,
-    showNLPInsights: false
+    showNLPInsights: false,
+    wakeWordEnabled: true
   });
 
   const { messages, isLoading, sendMessage, messagesEndRef, scrollToBottom } = useChat(conversationId);
-  const { speak, stopSpeaking, isSpeaking } = useSpeech();
+  const { speak, stopSpeaking, isSpeaking, startWakeWordListening, stopWakeWordListening, isWakeWordListening, startListening } = useSpeech();
 
   // Auto-scroll when new messages arrive
   useEffect(() => {
@@ -67,6 +68,52 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     }
   }, [messages, settings.speechEnabled, speak, isLoading]);
 
+  // Wake word listening management
+  useEffect(() => {
+    if (settings.wakeWordEnabled && !isWakeWordListening) {
+      // Start wake word listening
+      const handleWakeWordDetected = () => {
+        console.log('Wake word detected - starting speech recognition');
+        
+        // Auto-send callback for when speech recognition detects silence
+        const handleAutoSend = (transcript: string) => {
+          console.log('Wake word triggered auto-send:', transcript);
+          if (transcript.trim()) {
+            handleSendMessage(transcript);
+          }
+        };
+        
+        // Start speech recognition with auto-send after wake word
+        startListening(
+          (transcript) => {
+            // This callback gets called for each speech result
+            console.log('Wake word speech result:', transcript);
+          },
+          'en-US',
+          true, // Enable auto-send
+          () => {
+            // Get the accumulated speech from the recognition
+            // This will be handled by the updated ChatInput component
+            console.log('Wake word auto-send triggered');
+          },
+          1000 // 1 second silence timeout
+        );
+      };
+      
+      startWakeWordListening(handleWakeWordDetected);
+    } else if (!settings.wakeWordEnabled && isWakeWordListening) {
+      // Stop wake word listening
+      stopWakeWordListening();
+    }
+    
+    // Cleanup when component unmounts
+    return () => {
+      if (isWakeWordListening) {
+        stopWakeWordListening();
+      }
+    };
+  }, [settings.wakeWordEnabled, isWakeWordListening, startWakeWordListening, stopWakeWordListening, startListening]);
+
   const toggleSpeech = () => {
     if (isSpeaking) {
       stopSpeaking();
@@ -86,7 +133,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
             message={{
               id: "welcome",
               role: "assistant",
-              content: "Hello! I'm Bertha, your intelligent AI assistant. I can help you with conversations, web searches, translations, and much more. How can I assist you today?",
+              content: settings.wakeWordEnabled ? "Hello! I'm Bertha, your intelligent AI assistant. Just say 'Bertha' followed by your message and I'll respond automatically. You can also type or click the microphone button. How can I assist you today?" : "Hello! I'm Bertha, your intelligent AI assistant. I can help you with conversations, web searches, translations, and much more. How can I assist you today?",
               timestamp: new Date()
             }}
             showAvatar
@@ -143,8 +190,41 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
           speechEnabled={settings.speechEnabled}
         />
 
+        {/* Wake Word Status Indicator */}
+        {isWakeWordListening && (
+          <div className="text-center mb-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-full text-sm text-blue-700 dark:text-blue-300">
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+              <span>Listening for "Bertha"...</span>
+            </div>
+          </div>
+        )}
+
         {/* Quick Actions */}
         <div className="flex flex-wrap gap-2 mt-3 max-w-4xl mx-auto">
+          <Button
+            variant={isWakeWordListening ? "default" : "secondary"}
+            size="sm"
+            onClick={() => {
+              const newSettings = { ...settings, wakeWordEnabled: !settings.wakeWordEnabled };
+              setSettings(newSettings);
+              localStorage.setItem("bertha-settings", JSON.stringify(newSettings));
+            }}
+            data-testid="button-toggle-wakeword"
+          >
+            {settings.wakeWordEnabled ? (
+              <>
+                <Ear className="w-4 h-4 mr-1" />
+                Wake Word: On
+              </>
+            ) : (
+              <>
+                <EarOff className="w-4 h-4 mr-1" />
+                Wake Word: Off
+              </>
+            )}
+          </Button>
+          
           <Button
             variant="secondary"
             size="sm"

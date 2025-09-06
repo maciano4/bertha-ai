@@ -4,9 +4,12 @@ import { useToast } from "@/hooks/use-toast";
 export function useSpeech() {
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isWakeWordListening, setIsWakeWordListening] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const wakeWordRecognitionRef = useRef<any>(null);
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const onAutoSendRef = useRef<(() => void) | null>(null);
+  const onWakeWordDetectedRef = useRef<(() => void) | null>(null);
   const { toast } = useToast();
 
   // Text-to-Speech
@@ -203,13 +206,127 @@ export function useSpeech() {
     onAutoSendRef.current = null;
   }, []);
 
+  // Wake word detection for hands-free activation
+  const startWakeWordListening = useCallback((onWakeWordDetected: () => void) => {
+    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+      toast({
+        title: "Not Supported",
+        description: "Speech recognition is not supported in this browser",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const wakeWordRecognition = new SpeechRecognition();
+    
+    wakeWordRecognition.continuous = true;
+    wakeWordRecognition.interimResults = false;
+    wakeWordRecognition.lang = 'en-US';
+    wakeWordRecognition.maxAlternatives = 1;
+    
+    // Store wake word callback
+    onWakeWordDetectedRef.current = onWakeWordDetected;
+
+    wakeWordRecognition.onstart = () => {
+      setIsWakeWordListening(true);
+      console.log('Wake word detection started - say "Bertha" to activate');
+    };
+
+    wakeWordRecognition.onresult = (event: any) => {
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        if (result.isFinal) {
+          const transcript = result[0].transcript.toLowerCase().trim();
+          console.log('Wake word detection heard:', transcript);
+          
+          // Check if "bertha" is mentioned in the transcript
+          if (transcript.includes('bertha')) {
+            console.log('Wake word "Bertha" detected!');
+            // Stop wake word listening temporarily
+            wakeWordRecognition.stop();
+            
+            // Trigger wake word callback
+            if (onWakeWordDetectedRef.current) {
+              onWakeWordDetectedRef.current();
+            }
+            
+            // Restart wake word listening after a short delay
+            setTimeout(() => {
+              if (wakeWordRecognitionRef.current && !wakeWordRecognition._stopped) {
+                try {
+                  wakeWordRecognition.start();
+                } catch (error) {
+                  console.log('Wake word recognition restart handled');
+                }
+              }
+            }, 3000); // Wait 3 seconds before resuming wake word detection
+            
+            return;
+          }
+        }
+      }
+    };
+
+    wakeWordRecognition.onerror = (event: any) => {
+      // Ignore common errors and restart
+      if (event.error !== 'aborted' && event.error !== 'no-speech' && event.error !== 'audio-capture') {
+        console.log('Wake word recognition error:', event.error);
+      }
+      
+      // Auto-restart wake word detection after brief delay
+      if (!wakeWordRecognition._stopped) {
+        setTimeout(() => {
+          try {
+            if (wakeWordRecognitionRef.current) {
+              wakeWordRecognition.start();
+            }
+          } catch (error) {
+            console.log('Wake word recognition restart handled');
+          }
+        }, 1000);
+      }
+    };
+
+    wakeWordRecognition.onend = () => {
+      // Auto-restart unless explicitly stopped
+      if (!wakeWordRecognition._stopped) {
+        setTimeout(() => {
+          try {
+            if (wakeWordRecognitionRef.current) {
+              wakeWordRecognition.start();
+            }
+          } catch (error) {
+            console.log('Wake word recognition restart handled');
+          }
+        }, 100);
+      }
+    };
+
+    wakeWordRecognitionRef.current = wakeWordRecognition;
+    wakeWordRecognition.start();
+  }, [toast]);
+
+  const stopWakeWordListening = useCallback(() => {
+    if (wakeWordRecognitionRef.current) {
+      wakeWordRecognitionRef.current._stopped = true;
+      wakeWordRecognitionRef.current.stop();
+      setIsWakeWordListening(false);
+      console.log('Wake word detection stopped');
+    }
+    onWakeWordDetectedRef.current = null;
+  }, []);
+
   return {
     isListening,
     isSpeaking,
+    isWakeWordListening,
     speak,
     stopSpeaking,
     startListening,
-    stopListening
+    stopListening,
+    startWakeWordListening,
+    stopWakeWordListening
   };
 }
 
