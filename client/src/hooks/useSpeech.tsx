@@ -10,7 +10,15 @@ export function useSpeech() {
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const onAutoSendRef = useRef<(() => void) | null>(null);
   const onWakeWordDetectedRef = useRef<(() => void) | null>(null);
+  const pauseWakeWordRef = useRef<(() => void) | null>(null);
+  const resumeWakeWordRef = useRef<(() => void) | null>(null);
   const { toast } = useToast();
+
+  // Set wake word pause/resume callbacks
+  const setWakeWordCallbacks = useCallback((pauseCallback: () => void, resumeCallback: () => void) => {
+    pauseWakeWordRef.current = pauseCallback;
+    resumeWakeWordRef.current = resumeCallback;
+  }, []);
 
   // Text-to-Speech with Cameroon grandmother voice characteristics
   const speak = useCallback((text: string, rate: number = 0.8) => {
@@ -69,24 +77,28 @@ export function useSpeech() {
         utterance.onstart = () => {
           setIsSpeaking(true);
           console.log(`🔊 Speaking with voice: ${selectedVoice ? selectedVoice.name : 'default'} - PAUSING wake word detection`);
-          // Signal to pause wake word detection while speaking
-          if (onAutoSendRef.current) {
-            onAutoSendRef.current();
+          // Pause wake word detection while speaking
+          if (pauseWakeWordRef.current) {
+            pauseWakeWordRef.current();
           }
         };
         
         utterance.onend = () => {
           setIsSpeaking(false);
           console.log('🔇 Speech synthesis completed - RESUMING wake word detection');
-          // Signal to resume wake word detection after speaking
-          if (onWakeWordDetectedRef.current) {
-            onWakeWordDetectedRef.current();
+          // Resume wake word detection after speaking
+          if (resumeWakeWordRef.current) {
+            resumeWakeWordRef.current();
           }
         };
         
         utterance.onerror = (event) => {
           setIsSpeaking(false);
           console.error('Speech synthesis error:', event.error);
+          // Resume wake word detection even on error
+          if (resumeWakeWordRef.current) {
+            resumeWakeWordRef.current();
+          }
         };
         
         console.log('Starting speech synthesis...');
@@ -410,7 +422,8 @@ export function useSpeech() {
     startListening,
     stopListening,
     startWakeWordListening,
-    stopWakeWordListening
+    stopWakeWordListening,
+    setWakeWordCallbacks
   };
 }
 
