@@ -42,7 +42,8 @@ export function useWakeWordSpeech() {
           console.log('Wake word detection heard:', transcript);
           
           // Check if "bertha" is mentioned OR we're in conversation mode
-          if (transcript.includes('bertha') || conversationModeRef.current) {
+          // Only process transcripts with meaningful content (more than 2 characters)
+          if (transcript.length > 2 && (transcript.includes('bertha') || conversationModeRef.current)) {
             let messageToSend = '';
             let isNewConversation = transcript.includes('bertha');
             
@@ -97,7 +98,7 @@ export function useWakeWordSpeech() {
             } else {
               // We're in conversation mode - accept any message
               console.log('Conversation mode - processing follow-up:', transcript);
-              messageToSend = transcript;
+              messageToSend = transcript.trim();
               
               // Extend conversation mode
               if (conversationTimeoutRef.current) {

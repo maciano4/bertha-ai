@@ -82,9 +82,9 @@ export function useSpeech() {
       }
       
       // Grandmother voice characteristics
-      utterance.rate = rate; // Slower, thoughtful speech
-      utterance.pitch = 0.9; // Slightly lower pitch for age
-      utterance.volume = 0.9; // Warm, gentle volume
+      utterance.rate = Math.min(rate, 0.75); // Even slower, more deliberate speech like an elderly person
+      utterance.pitch = selectedVoice?.name.toLowerCase().includes('female') ? 1.0 : 0.9; // Adjust pitch based on voice
+      utterance.volume = 0.95; // Clear, warm volume
       
       // Add some regional speech patterns for Cameroon influence
       utterance.onstart = () => {
