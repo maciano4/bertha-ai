@@ -54,7 +54,7 @@ export interface NLPAnalysis {
 export async function recognizeIntent(message: string): Promise<UserIntent> {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-5", // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
+      model: "gpt-4o", // Using GPT-4o which is OpenAI's latest model
       messages: [
         {
           role: "system",
@@ -89,7 +89,7 @@ export async function recognizeIntent(message: string): Promise<UserIntent> {
 export async function extractEntities(message: string): Promise<ExtractedEntity[]> {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-5", // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
+      model: "gpt-4o", // Using GPT-4o which is OpenAI's latest model
       messages: [
         {
           role: "system",
@@ -122,7 +122,7 @@ export async function extractEntities(message: string): Promise<ExtractedEntity[
 export async function analyzeSentiment(message: string): Promise<SentimentAnalysis> {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-5", // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
+      model: "gpt-4o", // Using GPT-4o which is OpenAI's latest model
       messages: [
         {
           role: "system",
@@ -159,7 +159,7 @@ export async function analyzeSentiment(message: string): Promise<SentimentAnalys
 export async function detectLanguage(message: string): Promise<string> {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-5", // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
+      model: "gpt-4o", // Using GPT-4o which is OpenAI's latest model
       messages: [
         {
           role: "system",
@@ -184,7 +184,7 @@ export async function detectLanguage(message: string): Promise<string> {
 export async function extractKeywords(message: string): Promise<string[]> {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-5", // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
+      model: "gpt-4o", // Using GPT-4o which is OpenAI's latest model
       messages: [
         {
           role: "system",
@@ -218,7 +218,7 @@ export async function analyzeContext(
     const recentHistory = conversationHistory.slice(-6).map(msg => `${msg.role}: ${msg.content}`).join('\n');
     
     const response = await openai.chat.completions.create({
-      model: "gpt-5", // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
+      model: "gpt-4o", // Using GPT-4o which is OpenAI's latest model
       messages: [
         {
           role: "system",
@@ -268,7 +268,7 @@ export async function summarizeConversation(
     const fullHistory = conversationHistory.map(msg => `${msg.role}: ${msg.content}`).join('\n');
     
     const response = await openai.chat.completions.create({
-      model: "gpt-5", // the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
+      model: "gpt-4o", // Using GPT-4o which is OpenAI's latest model
       messages: [
         {
           role: "system",

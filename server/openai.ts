@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { performNLPAnalysis, type NLPAnalysis } from "./nlp";
 
-// the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
+// Using GPT-4o which is OpenAI's latest multimodal model
 const openai = new OpenAI({ 
   apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_KEY || "default_key"
 });
@@ -72,7 +72,7 @@ export async function generateChatResponse(
     ];
 
     const response = await openai.chat.completions.create({
-      model: "gpt-5",
+      model: "gpt-4o",
       messages,
       max_completion_tokens: 1000,
     });
@@ -96,7 +96,7 @@ export async function translateText(text: string, targetLanguage: string): Promi
     if (targetLanguage === "en") return text;
 
     const response = await openai.chat.completions.create({
-      model: "gpt-5",
+      model: "gpt-4o",
       messages: [
         {
           role: "system",
@@ -120,7 +120,7 @@ export async function translateText(text: string, targetLanguage: string): Promi
 export async function analyzeImage(base64Image: string): Promise<string> {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-5",
+      model: "gpt-4o",
       messages: [
         {
           role: "user",

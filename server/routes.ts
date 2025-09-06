@@ -134,7 +134,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         language,
         searchResults,
         true, // Enable NLP analysis
-        recognizedUser // Pass recognized user
+        recognizedUser || undefined // Pass recognized user
       );
 
       // Save user message if conversation exists
