@@ -44,12 +44,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         searchResults = await performWebSearch(message);
       }
 
-      // Generate AI response
+      // Generate AI response with NLP analysis
       const aiResponse = await generateChatResponse(
         message,
         conversationHistory,
         language,
-        searchResults
+        searchResults,
+        true // Enable NLP analysis
       );
 
       // Save user message if conversation exists
@@ -58,7 +59,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           conversationId,
           role: "user",
           content: message,
-          metadata: null
+          metadata: aiResponse.nlpAnalysis ? {
+            intent: aiResponse.nlpAnalysis.intent,
+            sentiment: aiResponse.nlpAnalysis.sentiment,
+            entities: aiResponse.nlpAnalysis.entities,
+            keywords: aiResponse.nlpAnalysis.keywords
+          } : null
         });
 
         // Save AI response
@@ -69,7 +75,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           metadata: {
             searchUsed: aiResponse.searchUsed,
             translationUsed: aiResponse.translationUsed,
-            searchResults: searchResults || undefined
+            searchResults: searchResults || undefined,
+            nlpAnalysis: aiResponse.nlpAnalysis
           }
         });
       }

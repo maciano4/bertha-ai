@@ -91,9 +91,9 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
         )}
 
         {/* Chat Messages */}
-        {messages.map((message) => (
+        {messages.map((message, index) => (
           <MessageBubble
-            key={message.id}
+            key={`${message.id}-${index}`}
             message={message}
             showAvatar={message.role === "assistant"}
             data-testid={`message-${message.role}-${message.id}`}
