@@ -62,35 +62,37 @@ export function useWakeWordSpeech() {
                 if (cleanTranscript && cleanTranscript.length > 1) {
                   console.log('Using full transcript without Bertha word:', cleanTranscript);
                   messageToSend = cleanTranscript;
+                } else {
+                  // If just "bertha" was said, send a greeting
+                  console.log('Just wake word detected, sending greeting');
+                  messageToSend = "hello";
                 }
               }
               
-              // Enable conversation mode after 3 second delay
-              setTimeout(() => {
-                conversationModeRef.current = true;
-                console.log('Conversation mode activated - you can now ask follow-up questions');
-                
-                // Show notification that follow-up mode is ready
+              // Enable conversation mode immediately for smoother experience
+              conversationModeRef.current = true;
+              console.log('Conversation mode activated - you can now ask follow-up questions');
+              
+              // Show notification that follow-up mode is ready
+              toast({
+                title: "Listening to Bertha...",
+                description: "Conversation started - you can ask follow-ups",
+                duration: 2000
+              });
+              
+              // Set 2-minute timeout for conversation mode
+              if (conversationTimeoutRef.current) {
+                clearTimeout(conversationTimeoutRef.current);
+              }
+              conversationTimeoutRef.current = setTimeout(() => {
+                conversationModeRef.current = false;
+                console.log('Conversation mode ended - say Bertha to reactivate');
                 toast({
-                  title: "Ready for Follow-up!",
-                  description: "You can now ask questions without saying 'Bertha'",
-                  duration: 2000
+                  title: "Conversation Paused",
+                  description: "Say 'Bertha' to start chatting again",
+                  duration: 3000
                 });
-                
-                // Set 90 second timeout for conversation mode
-                if (conversationTimeoutRef.current) {
-                  clearTimeout(conversationTimeoutRef.current);
-                }
-                conversationTimeoutRef.current = setTimeout(() => {
-                  conversationModeRef.current = false;
-                  console.log('Conversation mode ended - say Bertha to reactivate');
-                  toast({
-                    title: "Conversation Ended",
-                    description: "Say 'Bertha' to start a new conversation",
-                    duration: 3000
-                  });
-                }, 90000);
-              }, 3000);
+              }, 120000); // 2 minutes instead of 90 seconds
               
             } else {
               // We're in conversation mode - accept any message
@@ -104,7 +106,7 @@ export function useWakeWordSpeech() {
               conversationTimeoutRef.current = setTimeout(() => {
                 conversationModeRef.current = false;
                 console.log('Conversation mode ended - say Bertha to reactivate');
-              }, 90000);
+              }, 120000); // 2 minutes for follow-ups too
             }
             
             if (messageToSend && messageToSend.length > 1) {

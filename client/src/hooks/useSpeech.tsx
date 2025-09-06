@@ -31,33 +31,34 @@ export function useSpeech() {
       console.log('Available voices:', voices.map(v => `${v.name} (${v.lang})`));
       
       // Find the best female voice for a Cameroon grandmother
-      // Priority order: French female, English African female, any female voice
+      // Priority order: French female, British female, any female voice
       let selectedVoice = 
-        // First try: French female voices
+        // First try: French voices (closest to Cameroon bilingual background)
         voices.find(voice => 
           voice.lang.startsWith('fr') && 
           (voice.name.toLowerCase().includes('female') || voice.name.toLowerCase().includes('femme'))
         ) ||
-        // Second try: African English female voices  
+        // Second try: British/UK female voices (colonial history)
         voices.find(voice => 
-          (voice.lang.includes('za') || voice.lang.includes('ng') || voice.lang.includes('ke')) && 
-          (voice.name.toLowerCase().includes('female') || voice.name.toLowerCase().includes('woman'))
+          voice.lang.includes('en-GB') && 
+          voice.name.toLowerCase().includes('female')
         ) ||
-        // Third try: Any female voice (excluding male keywords)
+        // Third try: Any female voice by name pattern
         voices.find(voice => 
-          (voice.name.toLowerCase().includes('female') || 
-           voice.name.toLowerCase().includes('woman') || 
-           voice.name.toLowerCase().includes('lady')) &&
+          voice.name.toLowerCase().includes('female') &&
           !voice.name.toLowerCase().includes('male')
         ) ||
-        // Fourth try: Voices with female-sounding names
+        // Fourth try: Voices with common female names
         voices.find(voice => 
-          /\b(samantha|victoria|susan|anna|karen|sarah|emma|sophie|marie|claire)\b/i.test(voice.name)
+          /\b(linda|zira|susan|anna|karen|sarah|emma|sophie|marie|claire|samantha|victoria)\b/i.test(voice.name)
         ) ||
-        // Last resort: Any voice that doesn't explicitly say male
+        // Fifth try: Look for voices that don't have male indicators
         voices.find(voice => 
           !voice.name.toLowerCase().includes('male') && 
           !voice.name.toLowerCase().includes('man') &&
+          !voice.name.toLowerCase().includes('david') &&
+          !voice.name.toLowerCase().includes('richard') &&
+          !voice.name.toLowerCase().includes('mark') &&
           voice.lang.startsWith('en')
         );
       
