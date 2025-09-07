@@ -127,6 +127,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
         voiceProfileStorage.updateUsage(voiceMatch.profileId);
       }
 
+      // Check if user is asking to repeat the last response
+      const repeatPatterns = [
+        /can you repeat/i,
+        /repeat that/i,
+        /say that again/i,
+        /what did you say/i,
+        /repeat please/i,
+        /repeat last/i
+      ];
+      
+      const isRepeatRequest = repeatPatterns.some(pattern => pattern.test(message.trim()));
+      
+      if (isRepeatRequest && messages.length > 0) {
+        // Find the last assistant message
+        const lastAssistantMessage = [...messages].reverse().find(m => m.role === 'assistant');
+        
+        if (lastAssistantMessage) {
+          console.log('🔄 Repeat request detected - returning last assistant message:', lastAssistantMessage.content.slice(0, 50));
+          
+          // Save user message
+          if (conversationId) {
+            await storage.createMessage({
+              conversationId,
+              role: "user",
+              content: message,
+              metadata: null
+            });
+
+            // Save the repeated assistant message
+            await storage.createMessage({
+              conversationId,
+              role: "assistant",
+              content: lastAssistantMessage.content,
+              metadata: {
+                isRepeat: true
+              }
+            });
+          }
+
+          return res.json({
+            response: lastAssistantMessage.content,
+            searchUsed: false,
+            translationUsed: false,
+            isRepeat: true
+          });
+        }
+      }
+
       // Generate AI response with NLP analysis
       const aiResponse = await generateChatResponse(
         message,
