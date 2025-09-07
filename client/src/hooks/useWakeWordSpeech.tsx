@@ -144,20 +144,26 @@ export function useWakeWordSpeech() {
               
               // Check if we're currently speaking to prevent audio feedback loops
               if (window.speechSynthesis && window.speechSynthesis.speaking) {
-                // Check for "Bertha" with multiple variations including common speech recognition errors
+                // Check for "Bertha" variations or "Pause Please" for interruption
                 const transcriptLower = transcript.toLowerCase();
-                const berthaVariations = ['bertha', 'berta', 'berda', 'berth', 'martha', 'marta'];
+                const berthaVariations = ['bertha', 'berta', 'berda', 'berth'];
+                const pauseCommands = ['pause please', 'pause', 'stop please', 'stop'];
                 const explicitBerthaDetected = berthaVariations.some(variation => transcriptLower.includes(variation));
+                const pauseDetected = pauseCommands.some(command => transcriptLower.includes(command));
+                const shouldInterrupt = explicitBerthaDetected || pauseDetected;
                 
                 console.log('🔍 INTERRUPTION CHECK:', {
                   transcript: transcript.slice(0, 60),
                   transcriptLower: transcriptLower.slice(0, 60),
                   berthaDetected: explicitBerthaDetected,
+                  pauseDetected: pauseDetected,
+                  shouldInterrupt: shouldInterrupt,
                   isSpeaking: window.speechSynthesis.speaking
                 });
                 
-                if (explicitBerthaDetected) {
-                  console.log('🛑 INTERRUPTING Bertha speech - wake word detected:', transcriptLower.slice(0, 50));
+                if (shouldInterrupt) {
+                  const interruptReason = explicitBerthaDetected ? 'wake word' : 'pause command';
+                  console.log(`🛑 INTERRUPTING Bertha speech - ${interruptReason} detected:`, transcriptLower.slice(0, 50));
                   window.speechSynthesis.cancel();
                 } else {
                   console.log('⏸️ Audio feedback detected during speech - ignoring to prevent loop:', transcript.slice(0, 50));
