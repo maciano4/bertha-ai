@@ -144,9 +144,9 @@ export function useWakeWordSpeech() {
               
               // Check if we're currently speaking to prevent audio feedback loops
               if (window.speechSynthesis && window.speechSynthesis.speaking) {
-                // Check for "Bertha" with multiple variations and debugging
+                // Check for "Bertha" with multiple variations including common speech recognition errors
                 const transcriptLower = transcript.toLowerCase();
-                const berthaVariations = ['bertha', 'berta', 'berda', 'berth'];
+                const berthaVariations = ['bertha', 'berta', 'berda', 'berth', 'martha', 'marta'];
                 const explicitBerthaDetected = berthaVariations.some(variation => transcriptLower.includes(variation));
                 
                 console.log('🔍 INTERRUPTION CHECK:', {
