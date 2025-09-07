@@ -71,26 +71,30 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     setWakeWordCallbacks(pauseWakeWordDetection, resumeWakeWordDetection);
   }, [setWakeWordCallbacks, pauseWakeWordDetection, resumeWakeWordDetection]);
 
-  // Handle AI response speech with deduplication
+  // Handle AI response speech - simplified and more reliable
   const lastSpokenMessageRef = useRef<string>('');
   useEffect(() => {
-    // Add longer delay to ensure all messages are fully loaded
-    const timer = setTimeout(() => {
-      if (!settings.speechEnabled || !messages.length || isLoading) return;
+    if (!settings.speechEnabled || !messages.length) return;
 
-      const lastMessage = messages[messages.length - 1];
-      if (lastMessage.role === "assistant") {
-        // Prevent duplicate speech synthesis for the same message
-        const messageKey = `${lastMessage.content}-${messages.length}`;
-        if (lastSpokenMessageRef.current !== messageKey) {
-          lastSpokenMessageRef.current = messageKey;
-          console.log('🎙️ Starting speech synthesis for:', lastMessage.content.slice(0, 50) + '...');
-          speak(lastMessage.content);
-        }
+    const lastMessage = messages[messages.length - 1];
+    console.log('🔍 Checking message for speech:', { 
+      role: lastMessage.role, 
+      content: lastMessage.content.slice(0, 30),
+      isLoading,
+      speechEnabled: settings.speechEnabled 
+    });
+
+    if (lastMessage.role === "assistant" && !isLoading) {
+      // Prevent duplicate speech synthesis for the same message
+      const messageKey = `${lastMessage.content}-${messages.length}`;
+      if (lastSpokenMessageRef.current !== messageKey) {
+        lastSpokenMessageRef.current = messageKey;
+        console.log('🎙️ Starting speech synthesis for:', lastMessage.content.slice(0, 50) + '...');
+        speak(lastMessage.content);
+      } else {
+        console.log('⚠️ Skipping duplicate speech synthesis');
       }
-    }, 200); // Longer delay for reliable triggering
-
-    return () => clearTimeout(timer);
+    }
   }, [messages, settings.speechEnabled, speak, isLoading]);
 
   // Wake word listening management (run only once on mount)
