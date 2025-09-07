@@ -83,6 +83,16 @@ export function useSpeech() {
         utterance.onend = () => {
           setIsSpeaking(false);
           console.log('🔇 Speech synthesis completed naturally');
+          
+          // Add grace period to ignore speech recognition for 2 seconds after speech ends
+          (window as any).berthaJustFinishedSpeaking = true;
+          console.log('⏸️ Setting 2-second grace period to ignore audio feedback');
+          
+          setTimeout(() => {
+            (window as any).berthaJustFinishedSpeaking = false;
+            console.log('✅ Grace period ended - wake word detection fully active');
+          }, 2000); // 2-second grace period
+          
           // No need to resume since we never paused
         };
         

@@ -140,6 +140,12 @@ export function useWakeWordSpeech() {
             }
             
             if (messageToSend && messageToSend.length > 1) {
+              // Check for grace period after speech synthesis ends to ignore audio echoes
+              if ((window as any).berthaJustFinishedSpeaking) {
+                console.log('⏸️ Grace period active - ignoring potential audio echo:', transcript.slice(0, 50));
+                return;
+              }
+              
               // Check if we're currently speaking to prevent audio feedback loops BEFORE sending message
               if (window.speechSynthesis && window.speechSynthesis.speaking) {
                 // Check for "Bertha" variations or "Pause Please" for interruption
