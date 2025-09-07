@@ -140,9 +140,7 @@ export function useWakeWordSpeech() {
             }
             
             if (messageToSend && messageToSend.length > 1) {
-              console.log(`📤 SENDING MESSAGE: "${messageToSend}" (New conversation: ${isNewConversation})`);
-              
-              // Check if we're currently speaking to prevent audio feedback loops
+              // Check if we're currently speaking to prevent audio feedback loops BEFORE sending message
               if (window.speechSynthesis && window.speechSynthesis.speaking) {
                 // Check for "Bertha" variations or "Pause Please" for interruption
                 const transcriptLower = transcript.toLowerCase();
@@ -170,6 +168,8 @@ export function useWakeWordSpeech() {
                   return; // Ignore all speech during synthesis unless "Bertha" is explicitly said
                 }
               }
+              
+              console.log(`📤 SENDING MESSAGE: "${messageToSend}" (New conversation: ${isNewConversation})`);
               
               // Show confirmation
               toast({
