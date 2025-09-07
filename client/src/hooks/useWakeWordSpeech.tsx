@@ -135,11 +135,20 @@ export function useWakeWordSpeech() {
               
               // Check if we're currently speaking to prevent audio feedback loops
               if (window.speechSynthesis && window.speechSynthesis.speaking) {
-                // ONLY interrupt if this explicitly contains "Bertha" - prevents audio feedback
-                const explicitBerthaDetected = transcript.toLowerCase().includes('bertha');
+                // Check for "Bertha" with multiple variations and debugging
+                const transcriptLower = transcript.toLowerCase();
+                const berthaVariations = ['bertha', 'berta', 'berda', 'berth'];
+                const explicitBerthaDetected = berthaVariations.some(variation => transcriptLower.includes(variation));
+                
+                console.log('🔍 INTERRUPTION CHECK:', {
+                  transcript: transcript.slice(0, 60),
+                  transcriptLower: transcriptLower.slice(0, 60),
+                  berthaDetected: explicitBerthaDetected,
+                  isSpeaking: window.speechSynthesis.speaking
+                });
                 
                 if (explicitBerthaDetected) {
-                  console.log('🛑 INTERRUPTING Bertha speech - explicit "Bertha" detected during speech');
+                  console.log('🛑 INTERRUPTING Bertha speech - wake word detected:', transcriptLower.slice(0, 50));
                   window.speechSynthesis.cancel();
                 } else {
                   console.log('⏸️ Audio feedback detected during speech - ignoring to prevent loop:', transcript.slice(0, 50));
