@@ -14,26 +14,29 @@ export interface ChatResponse {
   nlpAnalysis?: NLPAnalysis;
 }
 
-// Function to get real-time information
+// Function to get real-time information in Eastern Time
 function getRealTimeInfo(): string {
   const now = new Date();
+  // Use Eastern Time zone for Bertha
   const timeString = now.toLocaleTimeString('en-US', { 
     hour: 'numeric', 
     minute: '2-digit', 
-    hour12: true 
+    hour12: true,
+    timeZone: 'America/New_York'
   });
   const dateString = now.toLocaleDateString('en-US', { 
     weekday: 'long', 
     year: 'numeric', 
     month: 'long', 
-    day: 'numeric' 
+    day: 'numeric',
+    timeZone: 'America/New_York'
   });
   
-  return `Current real-time information:
+  return `Current real-time information (Eastern Time):
 - Current time: ${timeString}
 - Current date: ${dateString}
-- Day of week: ${now.toLocaleDateString('en-US', { weekday: 'long' })}
-- Month: ${now.toLocaleDateString('en-US', { month: 'long' })}
+- Day of week: ${now.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/New_York' })}
+- Month: ${now.toLocaleDateString('en-US', { month: 'long', timeZone: 'America/New_York' })}
 - Year: ${now.getFullYear()}`;
 }
 

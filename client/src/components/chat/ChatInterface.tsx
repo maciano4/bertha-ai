@@ -90,10 +90,17 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
       if (lastSpokenMessageRef.current !== messageKey) {
         lastSpokenMessageRef.current = messageKey;
         console.log('🎙️ Starting speech synthesis for:', lastMessage.content.slice(0, 50) + '...');
+        // Immediate speech synthesis with no delay
         speak(lastMessage.content);
       } else {
         console.log('⚠️ Skipping duplicate speech synthesis');
       }
+    } else {
+      console.log('❌ Not speaking because:', { 
+        role: lastMessage.role, 
+        isLoading, 
+        condition: lastMessage.role === "assistant" && !isLoading 
+      });
     }
   }, [messages, settings.speechEnabled, speak, isLoading]);
 
