@@ -66,10 +66,8 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     await sendMessage(message, settings);
   }, [conversationId, onConversationStart, sendMessage, settings]);
 
-  // Connect speech synthesis to wake word detection pause/resume
-  useEffect(() => {
-    setWakeWordCallbacks(pauseWakeWordDetection, resumeWakeWordDetection);
-  }, [setWakeWordCallbacks, pauseWakeWordDetection, resumeWakeWordDetection]);
+  // Speech interruption is now handled directly in wake word detection
+  // No need to pause/resume wake word detection during speech
 
   // Handle AI response speech - simplified and more reliable
   const lastSpokenMessageRef = useRef<string>('');

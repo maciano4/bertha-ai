@@ -133,6 +133,12 @@ export function useWakeWordSpeech() {
             if (messageToSend && messageToSend.length > 1) {
               console.log(`📤 SENDING MESSAGE: "${messageToSend}" (New conversation: ${isNewConversation})`);
               
+              // INTERRUPT speech synthesis if currently speaking
+              if (window.speechSynthesis && window.speechSynthesis.speaking) {
+                console.log('🛑 INTERRUPTING Bertha speech for new message');
+                window.speechSynthesis.cancel();
+              }
+              
               // Show confirmation
               toast({
                 title: isNewConversation ? "Wake Word Detected!" : "Follow-up Message!",
