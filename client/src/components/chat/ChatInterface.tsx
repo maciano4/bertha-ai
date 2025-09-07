@@ -106,28 +106,11 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
   useEffect(() => {
     if (settings.wakeWordEnabled) {
       console.log('🎤 Starting wake word listening (initial setup)...');
-      // Start wake word listening with stable message handling
+      // Start wake word listening with stable message handling  
       startWakeWordListening((message: string) => {
         console.log('Wake word message received:', message);
-        // Create conversation if needed and send message
-        (async () => {
-          if (!conversationId) {
-            try {
-              const response = await fetch("/api/conversations", {
-                method: "POST", 
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title: message.slice(0, 50) + "..." })
-              });
-              const newConversation = await response.json();
-              onConversationStart(newConversation.id);
-            } catch (error) {
-              console.error("Failed to create conversation:", error);
-            }
-          }
-          
-          // Send message directly to avoid re-render issues
-          await sendMessage(message, settings);
-        })();
+        // Use the existing handleSendMessage which properly manages conversation creation
+        handleSendMessage(message);
       });
     }
     
