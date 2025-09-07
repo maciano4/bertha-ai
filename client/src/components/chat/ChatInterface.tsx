@@ -72,6 +72,13 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
   // Handle AI response speech - simplified and more reliable
   const lastSpokenMessageRef = useRef<string>('');
   useEffect(() => {
+    console.log('🔍 SPEECH EFFECT TRIGGERED:', {
+      speechEnabled: settings.speechEnabled,
+      messagesLength: messages.length,
+      isLoading,
+      lastMessageRole: messages.length > 0 ? messages[messages.length - 1].role : 'none'
+    });
+
     if (!settings.speechEnabled || !messages.length) return;
 
     const lastMessage = messages[messages.length - 1];
@@ -87,7 +94,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
       const messageKey = `${lastMessage.content}-${messages.length}`;
       if (lastSpokenMessageRef.current !== messageKey) {
         lastSpokenMessageRef.current = messageKey;
-        console.log('🎙️ Starting speech synthesis for:', lastMessage.content.slice(0, 50) + '...');
+        console.log('🎙️ SPEAKING ASSISTANT MESSAGE:', lastMessage.content.slice(0, 50) + '...');
         // Immediate speech synthesis with no delay
         speak(lastMessage.content);
       } else {
@@ -97,6 +104,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
       console.log('❌ Not speaking because:', { 
         role: lastMessage.role, 
         isLoading, 
+        isAssistant: lastMessage.role === "assistant",
         condition: lastMessage.role === "assistant" && !isLoading 
       });
     }
