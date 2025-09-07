@@ -40,7 +40,16 @@ export function useWakeWordSpeech() {
         const result = event.results[i];
         if (result.isFinal) {
           const transcript = result[0].transcript.toLowerCase().trim();
+          const isBerthaSpeaking = window.speechSynthesis && window.speechSynthesis.speaking;
+          
           console.log('Wake word detection heard:', transcript);
+          console.log('🎤 DETECTION STATE:', {
+            transcript: transcript.slice(0, 40),
+            isBerthaSpeaking: isBerthaSpeaking,
+            conversationMode: conversationModeRef.current,
+            isPaused: isPausedRef.current,
+            hasBertha: transcript.includes('bertha')
+          });
           
           // Check if "bertha" is mentioned OR we're in conversation mode
           // Only process transcripts with meaningful content (more than 2 characters)
