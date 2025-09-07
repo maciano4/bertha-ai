@@ -74,21 +74,23 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
   // Handle AI response speech with deduplication
   const lastSpokenMessageRef = useRef<string>('');
   useEffect(() => {
-    if (!settings.speechEnabled || !messages.length || isLoading) return;
+    // Add longer delay to ensure all messages are fully loaded
+    const timer = setTimeout(() => {
+      if (!settings.speechEnabled || !messages.length || isLoading) return;
 
-    const lastMessage = messages[messages.length - 1];
-    if (lastMessage.role === "assistant") {
-      // Prevent duplicate speech synthesis for the same message
-      const messageKey = `${lastMessage.content}-${messages.length}`;
-      if (lastSpokenMessageRef.current !== messageKey) {
-        lastSpokenMessageRef.current = messageKey;
-        console.log('🎙️ Starting speech synthesis for:', lastMessage.content.slice(0, 50) + '...');
-        // Small delay to ensure message is fully processed
-        setTimeout(() => {
+      const lastMessage = messages[messages.length - 1];
+      if (lastMessage.role === "assistant") {
+        // Prevent duplicate speech synthesis for the same message
+        const messageKey = `${lastMessage.content}-${messages.length}`;
+        if (lastSpokenMessageRef.current !== messageKey) {
+          lastSpokenMessageRef.current = messageKey;
+          console.log('🎙️ Starting speech synthesis for:', lastMessage.content.slice(0, 50) + '...');
           speak(lastMessage.content);
-        }, 100);
+        }
       }
-    }
+    }, 200); // Longer delay for reliable triggering
+
+    return () => clearTimeout(timer);
   }, [messages, settings.speechEnabled, speak, isLoading]);
 
   // Wake word listening management (run only once on mount)
