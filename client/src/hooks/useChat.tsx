@@ -69,6 +69,8 @@ export function useChat(conversationId: string | null) {
         }
       };
       
+      // Update isLoading FIRST, then add message to ensure proper timing for speech synthesis
+      setIsLoading(false);
       setMessages(prev => [...prev, aiMessage]);
       
       if (data.searchUsed) {
@@ -89,7 +91,11 @@ export function useChat(conversationId: string | null) {
       });
     },
     onSettled: () => {
-      setIsLoading(false);
+      // isLoading is now set in onSuccess for proper timing
+      // Only set to false here if there was an error
+      if (sendMessageMutation.isError) {
+        setIsLoading(false);
+      }
     }
   });
 
