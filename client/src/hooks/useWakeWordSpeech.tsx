@@ -133,10 +133,18 @@ export function useWakeWordSpeech() {
             if (messageToSend && messageToSend.length > 1) {
               console.log(`📤 SENDING MESSAGE: "${messageToSend}" (New conversation: ${isNewConversation})`);
               
-              // INTERRUPT speech synthesis if currently speaking
+              // Check if we're currently speaking to prevent audio feedback loops
               if (window.speechSynthesis && window.speechSynthesis.speaking) {
-                console.log('🛑 INTERRUPTING Bertha speech for new message');
-                window.speechSynthesis.cancel();
+                // ONLY interrupt if this explicitly contains "Bertha" - prevents audio feedback
+                const explicitBerthaDetected = transcript.toLowerCase().includes('bertha');
+                
+                if (explicitBerthaDetected) {
+                  console.log('🛑 INTERRUPTING Bertha speech - explicit "Bertha" detected during speech');
+                  window.speechSynthesis.cancel();
+                } else {
+                  console.log('⏸️ Audio feedback detected during speech - ignoring to prevent loop:', transcript.slice(0, 50));
+                  return; // Ignore all speech during synthesis unless "Bertha" is explicitly said
+                }
               }
               
               // Show confirmation
