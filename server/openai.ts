@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { performNLPAnalysis, type NLPAnalysis } from "./nlp";
 
-// Using GPT-4o which is OpenAI's latest multimodal model
+// Using GPT-3.5-turbo for faster responses. GPT-4o only needed for images/complex tasks
 const openai = new OpenAI({ 
   apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_KEY || "default_key"
 });
@@ -132,9 +132,11 @@ export async function generateChatResponse(
     ];
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-3.5-turbo",
       messages,
-      max_completion_tokens: 1000,
+      max_completion_tokens: 150,
+      temperature: 0.7,
+      top_p: 0.9
     });
 
     const content = response.choices[0].message.content || "I apologize, but I couldn't generate a response.";

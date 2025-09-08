@@ -355,9 +355,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         content: msg.content
       }));
 
-      // Perform web search if enabled and query seems to benefit from it
+      // Skip web search for simple greetings to speed up response
       let searchResults = "";
-      if (searchEnabled && (message.includes("?") || message.includes("what") || message.includes("how"))) {
+      const simpleGreetings = /^(hi|hello|hey|good morning|good afternoon|good evening|how are you|what's up)$/i;
+      const isSimpleGreeting = simpleGreetings.test(message.trim());
+      
+      if (!isSimpleGreeting && searchEnabled && (message.includes("?") || message.includes("what") || message.includes("how"))) {
         searchResults = await performWebSearch(message);
       }
 
@@ -417,13 +420,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Generate AI response with NLP analysis
+      // Skip NLP analysis for simple greetings to speed up response
+      const simpleGreetings = /^(hi|hello|hey|good morning|good afternoon|good evening|how are you|what's up)$/i;
+      const isSimpleGreeting = simpleGreetings.test(message.trim());
+      
+      // Generate AI response (skip NLP for simple greetings)
       const aiResponse = await generateChatResponse(
         message,
         conversationHistory,
         language,
         searchResults,
-        true, // Enable NLP analysis
+        !isSimpleGreeting, // Skip NLP analysis for simple greetings
         recognizedUser || undefined // Pass recognized user
       );
 
