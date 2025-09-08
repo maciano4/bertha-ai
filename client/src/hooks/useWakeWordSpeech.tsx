@@ -148,30 +148,23 @@ export function useWakeWordSpeech() {
               
               // Check if we're currently speaking to prevent audio feedback loops BEFORE sending message
               if (window.speechSynthesis && window.speechSynthesis.speaking) {
-                // Check for "Bertha" variations or "Pause Please" for interruption
+                // Allow ANY speech to interrupt Bertha (natural conversation flow)
                 const transcriptLower = transcript.toLowerCase();
-                const berthaVariations = ['bertha', 'berta', 'berda', 'berth'];
-                const pauseCommands = ['pause please', 'pause', 'stop please', 'stop'];
-                const explicitBerthaDetected = berthaVariations.some(variation => transcriptLower.includes(variation));
-                const pauseDetected = pauseCommands.some(command => transcriptLower.includes(command));
-                const shouldInterrupt = explicitBerthaDetected || pauseDetected;
                 
                 console.log('🔍 INTERRUPTION CHECK:', {
                   transcript: transcript.slice(0, 60),
                   transcriptLower: transcriptLower.slice(0, 60),
-                  berthaDetected: explicitBerthaDetected,
-                  pauseDetected: pauseDetected,
-                  shouldInterrupt: shouldInterrupt,
+                  messageLength: messageToSend.length,
                   isSpeaking: window.speechSynthesis.speaking
                 });
                 
-                if (shouldInterrupt) {
-                  const interruptReason = explicitBerthaDetected ? 'wake word' : 'pause command';
-                  console.log(`🛑 INTERRUPTING Bertha speech - ${interruptReason} detected:`, transcriptLower.slice(0, 50));
+                // Only interrupt if there's meaningful speech (more than 2 characters)
+                if (messageToSend.length > 2) {
+                  console.log(`🛑 INTERRUPTING Bertha speech - user spoke:`, transcriptLower.slice(0, 50));
                   window.speechSynthesis.cancel();
                 } else {
-                  console.log('⏸️ Audio feedback detected during speech - ignoring to prevent loop:', transcript.slice(0, 50));
-                  return; // Ignore all speech during synthesis unless "Bertha" is explicitly said
+                  console.log('⏸️ Ignoring very short speech during synthesis:', transcript.slice(0, 20));
+                  return; // Ignore very short/unclear speech
                 }
               }
               
