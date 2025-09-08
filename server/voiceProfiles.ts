@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 export interface VoiceProfile {
   id: string;
   name: string;
+  profilePictureUrl?: string; // URL to uploaded profile picture
   voiceCharacteristics: {
     pitch?: number;
     rate?: number;
@@ -92,6 +93,15 @@ class VoiceProfileStorage {
       profile.lastUsed = new Date();
       profile.usageCount++;
     }
+  }
+
+  // Update profile picture
+  updateProfilePicture(profileId: string, profilePictureUrl: string): boolean {
+    const profile = this.profiles.get(profileId);
+    if (!profile) return false;
+    
+    profile.profilePictureUrl = profilePictureUrl;
+    return true;
   }
 
   // Delete a voice profile

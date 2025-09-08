@@ -60,7 +60,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         language: p.voiceCharacteristics.language,
         samplesCount: p.voiceSamples.length,
         usageCount: p.usageCount,
-        lastUsed: p.lastUsed
+        lastUsed: p.lastUsed,
+        profilePictureUrl: p.profilePictureUrl
       }));
       
       res.json({ profiles });
@@ -93,6 +94,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Voice stats error:", error);
       res.status(500).json({ error: "Failed to get voice stats" });
+    }
+  });
+
+  // Profile picture upload endpoints
+  app.post("/api/voice/profiles/:profileId/picture/upload", async (req, res) => {
+    try {
+      const objectStorageService = new ObjectStorageService();
+      const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+      res.json({ uploadURL });
+    } catch (error) {
+      console.error("Profile picture upload URL error:", error);
+      res.status(500).json({ error: "Failed to get upload URL" });
+    }
+  });
+
+  app.put("/api/voice/profiles/:profileId/picture", async (req, res) => {
+    try {
+      const { profileId } = req.params;
+      const { profilePictureURL } = req.body;
+
+      if (!profilePictureURL) {
+        return res.status(400).json({ error: "profilePictureURL is required" });
+      }
+
+      const objectStorageService = new ObjectStorageService();
+      const objectPath = objectStorageService.normalizeObjectEntityPath(profilePictureURL);
+
+      // Update voice profile with new picture
+      const updated = voiceProfileStorage.updateProfilePicture(profileId, objectPath);
+      
+      if (!updated) {
+        return res.status(404).json({ error: "Voice profile not found" });
+      }
+
+      res.json({ 
+        success: true, 
+        profileId,
+        profilePictureUrl: objectPath 
+      });
+    } catch (error) {
+      console.error("Profile picture update error:", error);
+      res.status(500).json({ error: "Failed to update profile picture" });
     }
   });
 
