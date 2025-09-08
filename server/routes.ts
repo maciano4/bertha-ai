@@ -253,7 +253,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (isWeatherRequest) {
         try {
           // Extract location from message or use default
-          let location = "London"; // Default location
+          let location = "New York"; // Default location (US Eastern time)
           
           // Try to extract location from common patterns
           const locationPatterns = [

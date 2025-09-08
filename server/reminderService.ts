@@ -288,13 +288,15 @@ export class ReminderService {
 
   // Get today's plan (convenience method)
   async getTodaysPlan(): Promise<{ plan: any; activities: any[] } | null> {
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    // Use US Eastern time as default timezone
+    const today = new Date(new Date().toLocaleString("en-US", {timeZone: "America/New_York"})).toISOString().split('T')[0];
     return this.getPlanForDate(today);
   }
 
   // Parse relative dates like "tomorrow", "yesterday", "next Monday"
   private parseRelativeDate(dateStr: string): string {
-    const today = new Date();
+    // Use US Eastern time as default timezone
+    const today = new Date(new Date().toLocaleString("en-US", {timeZone: "America/New_York"}));
     
     switch (dateStr.toLowerCase()) {
       case 'today':
@@ -332,9 +334,9 @@ export class ReminderService {
       // Determine the target date
       const targetDate = parseResult.requestedDate 
         ? this.parseRelativeDate(parseResult.requestedDate)
-        : new Date().toISOString().split('T')[0];
+        : new Date(new Date().toLocaleString("en-US", {timeZone: "America/New_York"})).toISOString().split('T')[0];
       
-      const isToday = targetDate === new Date().toISOString().split('T')[0];
+      const isToday = targetDate === new Date(new Date().toLocaleString("en-US", {timeZone: "America/New_York"})).toISOString().split('T')[0];
       const dateLabel = this.getDateLabel(targetDate);
       
       switch (parseResult.planningType) {
@@ -387,7 +389,8 @@ export class ReminderService {
   // Get a human-readable date label
   private getDateLabel(dateStr: string): string {
     const date = new Date(dateStr);
-    const today = new Date();
+    // Use US Eastern time as default timezone
+    const today = new Date(new Date().toLocaleString("en-US", {timeZone: "America/New_York"}));
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
     const yesterday = new Date(today);
@@ -404,7 +407,8 @@ export class ReminderService {
         weekday: 'long', 
         month: 'long', 
         day: 'numeric',
-        year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined
+        year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined,
+        timeZone: "America/New_York"
       });
     }
   }
