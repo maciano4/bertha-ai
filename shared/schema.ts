@@ -38,6 +38,32 @@ export const userSettings = pgTable("user_settings", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const reminders = pgTable("reminders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  message: text("message").notNull(),
+  remindAt: timestamp("remind_at").notNull(),
+  completed: boolean("completed").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const dailyPlans = pgTable("daily_plans", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  date: text("date").notNull(), // YYYY-MM-DD format
+  title: text("title").notNull(),
+  description: text("description"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const planActivities = pgTable("plan_activities", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  planId: varchar("plan_id").notNull().references(() => dailyPlans.id),
+  activity: text("activity").notNull(),
+  time: text("time"), // HH:MM format, optional
+  completed: boolean("completed").default(false).notNull(),
+  remindAt: timestamp("remind_at"), // Optional reminder time
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -62,6 +88,26 @@ export const insertUserSettingsSchema = createInsertSchema(userSettings).pick({
   voiceSpeed: true,
 });
 
+export const insertReminderSchema = createInsertSchema(reminders).pick({
+  message: true,
+  remindAt: true,
+  completed: true,
+});
+
+export const insertDailyPlanSchema = createInsertSchema(dailyPlans).pick({
+  date: true,
+  title: true,
+  description: true,
+});
+
+export const insertPlanActivitySchema = createInsertSchema(planActivities).pick({
+  planId: true,
+  activity: true,
+  time: true,
+  completed: true,
+  remindAt: true,
+});
+
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 export type InsertConversation = z.infer<typeof insertConversationSchema>;
@@ -70,6 +116,12 @@ export type InsertMessage = z.infer<typeof insertMessageSchema>;
 export type Message = typeof messages.$inferSelect;
 export type InsertUserSettings = z.infer<typeof insertUserSettingsSchema>;
 export type UserSettings = typeof userSettings.$inferSelect;
+export type InsertReminder = z.infer<typeof insertReminderSchema>;
+export type Reminder = typeof reminders.$inferSelect;
+export type InsertDailyPlan = z.infer<typeof insertDailyPlanSchema>;
+export type DailyPlan = typeof dailyPlans.$inferSelect;
+export type InsertPlanActivity = z.infer<typeof insertPlanActivitySchema>;
+export type PlanActivity = typeof planActivities.$inferSelect;
 
 // NLP Analysis types
 export interface NLPAnalysis {
