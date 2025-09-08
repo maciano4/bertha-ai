@@ -120,6 +120,27 @@ export function useWakeWordSpeech() {
               }, 120000); // 2 minutes instead of 90 seconds
               
             } else {
+              // Check for repeat command first
+              const transcriptLower = transcript.toLowerCase().trim();
+              if (transcriptLower === 'repeat' || transcriptLower === 'say that again' || transcriptLower === 'what did you say') {
+                console.log('🔄 REPEAT REQUEST detected');
+                const lastBerthaMessage = (window as any).lastBerthaSpokenMessage;
+                if (lastBerthaMessage) {
+                  console.log('🎙️ Repeating last sentence:', lastBerthaMessage.slice(0, 50) + '...');
+                  // Use the speech hook directly to repeat the last message
+                  if (window.speechSynthesis) {
+                    window.speechSynthesis.cancel(); // Stop any current speech
+                    setTimeout(() => {
+                      // Trigger repeat via a global event
+                      window.dispatchEvent(new CustomEvent('berthaRepeat', { detail: lastBerthaMessage }));
+                    }, 100);
+                  }
+                } else {
+                  console.log('❌ No previous message to repeat');
+                }
+                return; // Don't send as a regular message
+              }
+              
               // We're in conversation mode - accept any message
               console.log('🗣️ CONVERSATION MODE - Processing follow-up:', transcript);
               messageToSend = transcript.trim();
@@ -140,10 +161,19 @@ export function useWakeWordSpeech() {
             }
             
             if (messageToSend && messageToSend.length > 1) {
-              // Check for grace period after speech synthesis ends to ignore audio echoes
+              // Check for grace period - but only block very similar speech to Bertha's response
               if ((window as any).berthaJustFinishedSpeaking) {
-                console.log('⏸️ Grace period active - ignoring potential audio echo:', transcript.slice(0, 50));
-                return;
+                // Only ignore speech that looks like an echo of Bertha's own words
+                const transcriptLower = transcript.toLowerCase();
+                const commonBerthaWords = ['hello', 'dear', 'my dear', 'child', 'precious', 'how are you'];
+                const looksLikeEcho = commonBerthaWords.some(phrase => transcriptLower.includes(phrase));
+                
+                if (looksLikeEcho && messageToSend.length < 20) {
+                  console.log('⏸️ Grace period active - ignoring potential Bertha echo:', transcript.slice(0, 50));
+                  return;
+                } else {
+                  console.log('✅ Grace period active but allowing meaningful user speech:', transcript.slice(0, 50));
+                }
               }
               
               // Check if we're currently speaking to prevent audio feedback loops BEFORE sending message

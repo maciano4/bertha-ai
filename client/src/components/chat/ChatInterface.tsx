@@ -48,8 +48,9 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
 
   // Create conversation when first message is sent (stable callback to prevent wake word restarts)
   const handleSendMessage = useCallback(async (message: string) => {
+    // Only create conversation if we don't have one
     if (!conversationId) {
-      // Create new conversation
+      console.log('🆕 Creating new conversation for:', message.slice(0, 30));
       try {
         const response = await fetch("/api/conversations", {
           method: "POST",
@@ -57,10 +58,13 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
           body: JSON.stringify({ title: message.slice(0, 50) + "..." })
         });
         const newConversation = await response.json();
+        console.log('✅ New conversation created:', newConversation.id);
         onConversationStart(newConversation.id);
       } catch (error) {
         console.error("Failed to create conversation:", error);
       }
+    } else {
+      console.log('💬 Continuing existing conversation:', conversationId.slice(0, 8));
     }
     
     await sendMessage(message, settings);
@@ -92,6 +96,9 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     });
 
     if (lastAssistantMessage) {
+      // Store last message for repeat functionality
+      (window as any).lastBerthaSpokenMessage = lastAssistantMessage.content;
+      
       // Prevent duplicate speech synthesis for the same message
       const messageKey = `${lastAssistantMessage.content}-${messages.length}`;
       if (lastSpokenMessageRef.current !== messageKey) {
@@ -105,6 +112,15 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     } else {
       console.log('❌ No assistant message found to speak');
     }
+    
+    // Listen for repeat events
+    const handleRepeat = (event: any) => {
+      console.log('🔄 Handling repeat request for:', event.detail.slice(0, 50) + '...');
+      speak(event.detail);
+    };
+    
+    window.addEventListener('berthaRepeat', handleRepeat);
+    return () => window.removeEventListener('berthaRepeat', handleRepeat);
   }, [messages, settings.speechEnabled, speak, isLoading]);
 
   // Wake word listening management (run only once on mount)
