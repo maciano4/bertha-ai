@@ -7,6 +7,7 @@ import { Mic, User, Check, X, Volume2 } from 'lucide-react';
 import { useSpeech } from '@/hooks/useSpeech';
 import { useToast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
+import { ProfilePictureUpload } from './ProfilePictureUpload';
 
 interface VoiceTrainingProps {
   onComplete?: (profileId: string, name: string) => void;
@@ -22,12 +23,13 @@ const TRAINING_PHRASES = [
 ];
 
 export function VoiceTraining({ onComplete, onCancel }: VoiceTrainingProps) {
-  const [step, setStep] = useState<'name' | 'training' | 'complete'>('name');
+  const [step, setStep] = useState<'name' | 'training' | 'picture' | 'complete'>('name');
   const [userName, setUserName] = useState('');
   const [currentPhrase, setCurrentPhrase] = useState(0);
   const [recordedSamples, setRecordedSamples] = useState<string[]>([]);
   const [isRecording, setIsRecording] = useState(false);
   const [profileId, setProfileId] = useState<string | null>(null);
+  const [profilePictureUrl, setProfilePictureUrl] = useState<string | null>(null);
   
   const { startListening, stopListening, isListening, speak } = useSpeech();
   const { toast } = useToast();
@@ -65,8 +67,8 @@ export function VoiceTraining({ onComplete, onCancel }: VoiceTrainingProps) {
             description: `Sample ${currentPhrase + 1} recorded. Ready for next one?`
           });
         } else {
-          // Training complete
-          completeTraining();
+          // Voice training complete, move to picture step
+          await completeVoiceTraining();
         }
       },
       'en-US',
@@ -79,7 +81,7 @@ export function VoiceTraining({ onComplete, onCancel }: VoiceTrainingProps) {
     setIsRecording(false);
   };
 
-  const completeTraining = async () => {
+  const completeVoiceTraining = async () => {
     try {
       const response = await apiRequest('POST', '/api/voice/profiles', {
         name: userName,
@@ -89,14 +91,14 @@ export function VoiceTraining({ onComplete, onCancel }: VoiceTrainingProps) {
       
       const data = await response.json();
       setProfileId(data.profileId);
-      setStep('complete');
+      setStep('picture');
       
       // Speak confirmation
-      speak(`Great! I've learned your voice, ${userName}. I'll remember you next time we talk.`);
+      speak(`Great! I've learned your voice, ${userName}. Now let's add your picture so I can personalize your experience.`);
       
       toast({
-        title: "Voice Profile Created!",
-        description: `I'll now recognize you as ${userName} when you speak`
+        title: "Voice Training Complete!",
+        description: `Voice profile created. Now add your profile picture to complete personalization.`
       });
       
     } catch (error) {
@@ -106,6 +108,24 @@ export function VoiceTraining({ onComplete, onCancel }: VoiceTrainingProps) {
         variant: "destructive"
       });
     }
+  };
+
+  const handlePictureUpdated = (newUrl: string) => {
+    setProfilePictureUrl(newUrl);
+    setStep('complete');
+    
+    speak(`Perfect! Your personalized profile is now complete, ${userName}. I'll recognize your voice and show your picture when we chat.`);
+    
+    toast({
+      title: "Personalization Complete!",
+      description: "Your voice and picture are now linked. Bertha will recognize you!"
+    });
+  };
+
+  const skipPicture = () => {
+    setStep('complete');
+    
+    speak(`No problem, ${userName}. Your voice profile is ready. You can always add a picture later.`);
   };
 
   const handleComplete = () => {
@@ -235,6 +255,39 @@ export function VoiceTraining({ onComplete, onCancel }: VoiceTrainingProps) {
                   }`}
                 />
               ))}
+            </div>
+          </div>
+        )}
+
+        {step === 'picture' && profileId && (
+          <div className="space-y-4">
+            <div className="text-center">
+              <div className="text-lg font-semibold mb-2">
+                Voice Training Complete! 🎉
+              </div>
+              <div className="text-sm text-muted-foreground mb-4">
+                Now let's add your profile picture so Bertha can personalize your chat experience.
+              </div>
+            </div>
+
+            <ProfilePictureUpload 
+              profileId={profileId}
+              profileName={userName}
+              onPictureUpdated={handlePictureUpdated}
+            />
+
+            <div className="flex justify-center gap-2">
+              <Button 
+                variant="outline" 
+                onClick={skipPicture}
+                data-testid="button-skip-picture"
+              >
+                Skip for Now
+              </Button>
+            </div>
+
+            <div className="text-xs text-muted-foreground text-center">
+              You can always add or change your profile picture later in the Voice Profile Manager.
             </div>
           </div>
         )}
