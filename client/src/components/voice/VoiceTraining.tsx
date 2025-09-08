@@ -68,7 +68,7 @@ export function VoiceTraining({ onComplete, onCancel }: VoiceTrainingProps) {
           });
         } else {
           // Voice training complete, move to picture step
-          await completeVoiceTraining();
+          completeVoiceTraining();
         }
       },
       'en-US',
