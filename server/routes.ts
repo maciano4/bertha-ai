@@ -5,6 +5,7 @@ import { generateChatResponse, translateText, analyzeImage } from "./openai";
 import { voiceProfileStorage, analyzeVoiceInput, type VoiceProfile } from "./voiceProfiles";
 import { ObjectStorageService } from "./objectStorage";
 import { reminderService } from "./reminderService";
+import { WeatherService } from "./weatherService";
 import { insertMessageSchema, insertUserSettingsSchema } from "@shared/schema";
 import { z } from "zod";
 
@@ -143,6 +144,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Weather endpoints
+  const weatherService = new WeatherService();
+
+  app.get("/api/weather/current/:location", async (req, res) => {
+    try {
+      const { location } = req.params;
+      const weatherData = await weatherService.getWeatherByLocation(location);
+      
+      if (!weatherData.current) {
+        return res.status(404).json({ error: "Location not found" });
+      }
+
+      res.json(weatherData);
+    } catch (error) {
+      console.error("Error getting weather:", error);
+      res.status(500).json({ error: "Failed to get weather data" });
+    }
+  });
+
+  app.get("/api/weather/forecast/:location", async (req, res) => {
+    try {
+      const { location } = req.params;
+      const days = parseInt(req.query.days as string) || 5;
+      
+      const coordinates = await weatherService.getLocationCoordinates(location);
+      if (!coordinates) {
+        return res.status(404).json({ error: "Location not found" });
+      }
+
+      const forecast = await weatherService.getWeatherForecast(
+        coordinates.latitude, 
+        coordinates.longitude, 
+        days
+      );
+      
+      res.json({ 
+        location: `${coordinates.name}, ${coordinates.country}`,
+        forecast 
+      });
+    } catch (error) {
+      console.error("Error getting weather forecast:", error);
+      res.status(500).json({ error: "Failed to get weather forecast" });
+    }
+  });
+
   // Chat endpoint
   app.post("/api/chat", async (req, res) => {
     try {
@@ -184,6 +230,119 @@ export async function registerRoutes(app: Express): Promise<Server> {
           translationUsed: false,
           isReminderResponse: true
         });
+      }
+
+      // Check for weather requests
+      const weatherPatterns = [
+        /weather/i,
+        /temperature/i,
+        /rain/i,
+        /snow/i,
+        /forecast/i,
+        /sunny/i,
+        /cloudy/i,
+        /humid/i,
+        /wind/i,
+        /what's it like/i,
+        /how's the weather/i,
+        /weather like/i
+      ];
+
+      const isWeatherRequest = weatherPatterns.some(pattern => pattern.test(message));
+      
+      if (isWeatherRequest) {
+        try {
+          // Extract location from message or use default
+          let location = "London"; // Default location
+          
+          // Try to extract location from common patterns
+          const locationPatterns = [
+            /weather in ([^?]+)/i,
+            /weather for ([^?]+)/i,
+            /weather at ([^?]+)/i,
+            /temperature in ([^?]+)/i,
+            /forecast for ([^?]+)/i,
+            /forecast in ([^?]+)/i,
+            /what's it like in ([^?]+)/i,
+            /how's the weather in ([^?]+)/i
+          ];
+
+          for (const pattern of locationPatterns) {
+            const match = message.match(pattern);
+            if (match && match[1]) {
+              location = match[1].trim().replace(/\?$/, '');
+              break;
+            }
+          }
+
+          // Get weather data
+          const weatherData = await weatherService.getWeatherByLocation(location);
+          
+          if (weatherData.current) {
+            const weatherResponse = weatherService.formatWeatherResponse(weatherData);
+            
+            // Save user message and weather response
+            if (conversationId) {
+              await storage.createMessage({
+                conversationId,
+                role: "user",
+                content: message,
+                metadata: null
+              });
+
+              await storage.createMessage({
+                conversationId,
+                role: "assistant",
+                content: weatherResponse,
+                metadata: {
+                  isWeatherResponse: true,
+                  location: location
+                }
+              });
+            }
+
+            return res.json({
+              response: weatherResponse,
+              searchUsed: false,
+              translationUsed: false,
+              isWeatherResponse: true,
+              location: location
+            });
+          } else {
+            // If weather data not found, provide a helpful message
+            const errorResponse = `I'm sorry, dear. I couldn't find weather information for "${location}". Could you try a different city name or check the spelling?`;
+            
+            if (conversationId) {
+              await storage.createMessage({
+                conversationId,
+                role: "user",
+                content: message,
+                metadata: null
+              });
+
+              await storage.createMessage({
+                conversationId,
+                role: "assistant",
+                content: errorResponse,
+                metadata: {
+                  isWeatherResponse: true,
+                  error: "location_not_found"
+                }
+              });
+            }
+
+            return res.json({
+              response: errorResponse,
+              searchUsed: false,
+              translationUsed: false,
+              isWeatherResponse: true,
+              error: "location_not_found"
+            });
+          }
+        } catch (error) {
+          console.error("Error getting weather in chat:", error);
+          // Fall through to regular AI response if weather fails
+        }
       }
 
       // Get conversation history
