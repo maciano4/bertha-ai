@@ -56,6 +56,12 @@ export function useChat(conversationId: string | null) {
       return response.json();
     },
     onSuccess: (data) => {
+      console.log('✅ CHAT API SUCCESS:', {
+        response: data.response.slice(0, 50),
+        searchUsed: data.searchUsed,
+        timestamp: data.timestamp
+      });
+      
       // Add AI response to messages
       const aiMessage: Message = {
         id: Date.now().toString(),
@@ -69,9 +75,21 @@ export function useChat(conversationId: string | null) {
         }
       };
       
+      console.log('🔄 UPDATING CHAT STATE:', {
+        settingLoading: false,
+        addingMessage: aiMessage.content.slice(0, 50)
+      });
+      
       // Update isLoading FIRST, then add message to ensure proper timing for speech synthesis
       setIsLoading(false);
-      setMessages(prev => [...prev, aiMessage]);
+      setMessages(prev => {
+        const newMessages = [...prev, aiMessage];
+        console.log('📝 MESSAGES ARRAY UPDATED:', {
+          length: newMessages.length,
+          lastMessage: newMessages[newMessages.length - 1]
+        });
+        return newMessages;
+      });
       
       if (data.searchUsed) {
         addSystemMessage("Web search completed");
