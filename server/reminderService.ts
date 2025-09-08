@@ -31,13 +31,17 @@ export class ReminderService {
       }
 
       Examples:
-      - "remind me at 3pm to call mom" → hasReminder: true, reminderMessage: "call mom", reminderTime: today at 3pm
+      - "remind me at 3pm to call mom" → hasReminder: true, reminderMessage: "call mom", reminderTime: today at 3pm (or tomorrow if 3pm has passed)
       - "remind me in 30 minutes to take medication" → hasReminder: true, reminderMessage: "take medication", reminderTime: 30 minutes from now
       - "plan my day" → hasPlanningRequest: true, planningType: "create_plan"
       - "add go to gym at 6pm to my plan" → hasPlanningRequest: true, planningType: "add_activity"
       - "what's on my schedule today" → hasPlanningRequest: true, planningType: "view_plan"
 
+      IMPORTANT: If someone asks for a time that has already passed today (like 2pm when it's currently 6pm), 
+      set the reminder for that time TOMORROW, not today.
+
       Current time: ${new Date().toISOString()}
+      Current local time: ${new Date().toLocaleString()}
       Message: "${message}"
       `;
 
@@ -67,6 +71,11 @@ export class ReminderService {
   // Create a new reminder
   async createReminder(message: string, remindAt: Date): Promise<string> {
     try {
+      const now = new Date();
+      const isToday = remindAt.toDateString() === now.toDateString();
+      const isTomorrow = remindAt.getTime() > now.getTime() && 
+                        Math.abs(remindAt.getTime() - now.getTime()) <= 24 * 60 * 60 * 1000;
+
       const [reminder] = await db
         .insert(reminders)
         .values({
@@ -76,7 +85,13 @@ export class ReminderService {
         })
         .returning();
 
-      return `I'll remind you to ${message} at ${remindAt.toLocaleTimeString()}.`;
+      if (remindAt.getTime() <= now.getTime()) {
+        return `That time has already passed today. I'll remind you to ${message} tomorrow at ${remindAt.toLocaleTimeString()}.`;
+      } else if (isTomorrow && !isToday) {
+        return `Since it's past that time today, I'll remind you to ${message} tomorrow at ${remindAt.toLocaleTimeString()}.`;
+      } else {
+        return `I'll remind you to ${message} at ${remindAt.toLocaleTimeString()}.`;
+      }
     } catch (error) {
       console.error("Error creating reminder:", error);
       return "Sorry, I couldn't set that reminder right now.";
