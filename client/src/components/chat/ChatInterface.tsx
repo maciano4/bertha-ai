@@ -6,6 +6,7 @@ import MessageBubble from "./MessageBubble";
 import ChatInput from "./ChatInput";
 import { NLPInsights } from "@/components/nlp/NLPInsights";
 import { ReminderNotifications } from "../reminders/ReminderNotifications";
+import { DailyPlanner } from "../planning/DailyPlanner";
 import type { MessageMetadata } from "@shared/schema";
 import { Button } from "@/components/ui/button";
 import { Volume2, VolumeX, Ear, EarOff } from "lucide-react";
@@ -171,6 +172,9 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
       
       {/* Chat Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4" data-testid="chat-area">
+        {/* Daily Planner */}
+        <DailyPlanner />
+        
         {/* Welcome Message */}
         {messages.length === 0 && (
           <MessageBubble
