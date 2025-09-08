@@ -26,7 +26,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
   });
 
   const { messages, isLoading, sendMessage, messagesEndRef, scrollToBottom } = useChat(conversationId);
-  const { speak, stopSpeaking, isSpeaking, setWakeWordCallbacks } = useSpeech();
+  const { speak, stopSpeaking, isSpeaking, setWakeWordCallbacks, initializeSpeechSynthesis } = useSpeech();
   const { 
     isWakeWordListening, 
     startWakeWordListening, 
@@ -156,6 +156,13 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     };
   }, []); // Empty dependency array - only runs on mount/unmount
 
+  // Initialize speech synthesis on first user interaction
+  const handleUserInteraction = useCallback(() => {
+    if (settings.speechEnabled && !(window as any).speechSynthesisInitialized) {
+      initializeSpeechSynthesis();
+    }
+  }, [settings.speechEnabled, initializeSpeechSynthesis]);
+
   const toggleSpeech = () => {
     if (isSpeaking) {
       stopSpeaking();
@@ -163,10 +170,15 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     const newSettings = { ...settings, speechEnabled: !settings.speechEnabled };
     setSettings(newSettings);
     localStorage.setItem("bertha-settings", JSON.stringify(newSettings));
+    
+    // Initialize speech synthesis when enabling speech
+    if (newSettings.speechEnabled && !(window as any).speechSynthesisInitialized) {
+      initializeSpeechSynthesis();
+    }
   };
 
   return (
-    <div className="flex-1 flex flex-col">
+    <div className="flex-1 flex flex-col" onClick={handleUserInteraction}>
       {/* Reminder Notifications */}
       <ReminderNotifications />
       
@@ -272,6 +284,12 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
               </>
             )}
           </Button>
+          
+          {settings.speechEnabled && !(window as any).speechSynthesisInitialized && (
+            <div className="text-xs text-muted-foreground px-2 py-1 bg-yellow-100 dark:bg-yellow-900 rounded-md">
+              👆 Click anywhere to enable voice responses
+            </div>
+          )}
           
           <Button
             variant="secondary"

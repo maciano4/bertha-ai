@@ -23,6 +23,12 @@ export function useSpeech() {
   // Text-to-Speech with Cameroon grandmother voice characteristics
   const speak = useCallback((text: string, rate: number = 0.8) => {
     if ('speechSynthesis' in window) {
+      // Check if speech synthesis has been initialized with user interaction
+      if (!(window as any).speechSynthesisInitialized) {
+        console.log('⚠️ Speech synthesis not initialized - requiring user interaction first');
+        return;
+      }
+      
       // Cancel any ongoing speech
       window.speechSynthesis.cancel();
       
@@ -137,6 +143,33 @@ export function useSpeech() {
       });
     }
   }, [toast]);
+
+  // Initialize speech synthesis with user interaction
+  const initializeSpeechSynthesis = useCallback(() => {
+    if ('speechSynthesis' in window && !(window as any).speechSynthesisInitialized) {
+      console.log('🎤 Initializing speech synthesis with user interaction...');
+      
+      // Create a silent utterance to initialize the speech synthesis
+      const utterance = new SpeechSynthesisUtterance('');
+      utterance.volume = 0;
+      utterance.rate = 0.1;
+      utterance.pitch = 0.1;
+      
+      utterance.onstart = () => {
+        (window as any).speechSynthesisInitialized = true;
+        console.log('✅ Speech synthesis initialized successfully!');
+        window.speechSynthesis.cancel(); // Cancel the silent utterance
+      };
+      
+      utterance.onerror = (event) => {
+        console.log('⚠️ Speech synthesis initialization error:', event.error);
+        // Mark as initialized anyway to avoid repeated attempts
+        (window as any).speechSynthesisInitialized = true;
+      };
+      
+      window.speechSynthesis.speak(utterance);
+    }
+  }, []);
 
   const stopSpeaking = useCallback(() => {
     if ('speechSynthesis' in window) {
@@ -424,7 +457,8 @@ export function useSpeech() {
     stopListening,
     startWakeWordListening,
     stopWakeWordListening,
-    setWakeWordCallbacks
+    setWakeWordCallbacks,
+    initializeSpeechSynthesis
   };
 }
 
