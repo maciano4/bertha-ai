@@ -355,11 +355,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         content: msg.content
       }));
 
-      // Skip web search for simple greetings to speed up response
-      let searchResults = "";
+      // Check for simple greetings to optimize performance
       const simpleGreetings = /^(hi|hello|hey|good morning|good afternoon|good evening|how are you|what's up)$/i;
       const isSimpleGreeting = simpleGreetings.test(message.trim());
       
+      // Skip web search for simple greetings to speed up response
+      let searchResults = "";
       if (!isSimpleGreeting && searchEnabled && (message.includes("?") || message.includes("what") || message.includes("how"))) {
         searchResults = await performWebSearch(message);
       }
@@ -420,17 +421,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Skip NLP analysis for simple greetings to speed up response
-      const simpleGreetings = /^(hi|hello|hey|good morning|good afternoon|good evening|how are you|what's up)$/i;
-      const isSimpleGreeting = simpleGreetings.test(message.trim());
-      
-      // Generate AI response (skip NLP for simple greetings)
+      // For simple greetings, provide instant responses to achieve 1-second target
+      if (isSimpleGreeting) {
+        const quickResponses = [
+          "Hello dear",
+          "Hello, my child",
+          "Hi there, dear",
+          "Good to see you",
+          "I'm well, thank you dear",
+          "Hello my precious"
+        ];
+        
+        const quickResponse = quickResponses[Math.floor(Math.random() * quickResponses.length)];
+        
+        // Save messages quickly
+        if (conversationId) {
+          await storage.createMessage({
+            conversationId,
+            role: "user",
+            content: message,
+            metadata: null
+          });
+
+          await storage.createMessage({
+            conversationId,
+            role: "assistant",
+            content: quickResponse,
+            metadata: { isQuickResponse: true }
+          });
+        }
+
+        return res.json({
+          response: quickResponse,
+          searchUsed: false,
+          translationUsed: false,
+          isQuickResponse: true,
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // For complex messages, use full AI response
       const aiResponse = await generateChatResponse(
         message,
         conversationHistory,
         language,
         searchResults,
-        !isSimpleGreeting, // Skip NLP analysis for simple greetings
+        true, // Enable NLP analysis for complex messages
         recognizedUser || undefined // Pass recognized user
       );
 
