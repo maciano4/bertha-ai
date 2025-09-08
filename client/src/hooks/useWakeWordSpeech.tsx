@@ -161,24 +161,14 @@ export function useWakeWordSpeech() {
             }
             
             if (messageToSend && messageToSend.length > 1) {
-              // Check for grace period - but only block very similar speech to Bertha's response
+              // STRONG feedback detection - block ALL speech during and after Bertha speaks
               if ((window as any).berthaJustFinishedSpeaking) {
-                // Only ignore speech that looks like an echo of Bertha's own words
-                const transcriptLower = transcript.toLowerCase();
-                const commonBerthaWords = ['hello', 'dear', 'my dear', 'child', 'precious', 'how are you'];
-                const looksLikeEcho = commonBerthaWords.some(phrase => transcriptLower.includes(phrase));
-                
-                if (looksLikeEcho && messageToSend.length < 20) {
-                  console.log('⏸️ Grace period active - ignoring potential Bertha echo:', transcript.slice(0, 50));
-                  return;
-                } else {
-                  console.log('✅ Grace period active but allowing meaningful user speech:', transcript.slice(0, 50));
-                }
+                console.log('🛑 BLOCKING AUDIO FEEDBACK - Grace period active:', transcript.slice(0, 50));
+                return; // Block ALL speech during grace period
               }
               
-              // Check if we're currently speaking to prevent audio feedback loops BEFORE sending message
+              // Check if we're currently speaking - BLOCK EVERYTHING except explicit interruption commands
               if (window.speechSynthesis && window.speechSynthesis.speaking) {
-                // Allow ANY speech to interrupt Bertha (natural conversation flow)
                 const transcriptLower = transcript.toLowerCase();
                 
                 console.log('🔍 INTERRUPTION CHECK:', {
@@ -188,13 +178,16 @@ export function useWakeWordSpeech() {
                   isSpeaking: window.speechSynthesis.speaking
                 });
                 
-                // Only interrupt if there's meaningful speech (more than 2 characters)
-                if (messageToSend.length > 2) {
-                  console.log(`🛑 INTERRUPTING Bertha speech - user spoke:`, transcriptLower.slice(0, 50));
+                // ONLY allow explicit interruption commands - block ALL other speech during synthesis
+                const explicitInterrupts = ['bertha', 'stop', 'pause', 'stop please', 'pause please'];
+                const isExplicitInterrupt = explicitInterrupts.some(cmd => transcriptLower.includes(cmd));
+                
+                if (isExplicitInterrupt) {
+                  console.log(`🛑 EXPLICIT INTERRUPTION - stopping speech:`, transcriptLower.slice(0, 50));
                   window.speechSynthesis.cancel();
                 } else {
-                  console.log('⏸️ Ignoring very short speech during synthesis:', transcript.slice(0, 20));
-                  return; // Ignore very short/unclear speech
+                  console.log('🛑 BLOCKING AUDIO FEEDBACK during speech synthesis:', transcript.slice(0, 50));
+                  return; // Block ALL non-explicit interruptions to prevent feedback
                 }
               }
               

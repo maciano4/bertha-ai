@@ -91,7 +91,7 @@ export function useSpeech() {
           setTimeout(() => {
             (window as any).berthaJustFinishedSpeaking = false;
             console.log('✅ Grace period ended - wake word detection fully active');
-          }, 2000); // 2-second grace period
+          }, 4000); // 4-second grace period to prevent all feedback
           
           // No need to resume since we never paused
         };
