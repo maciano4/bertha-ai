@@ -69,7 +69,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
   // Speech interruption is now handled directly in wake word detection
   // No need to pause/resume wake word detection during speech
 
-  // Handle AI response speech - simplified and more reliable
+  // Handle AI response speech - look for LAST ASSISTANT message (ignore system messages)
   const lastSpokenMessageRef = useRef<string>('');
   useEffect(() => {
     console.log('🔍 SPEECH EFFECT TRIGGERED:', {
@@ -79,34 +79,31 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
       lastMessageRole: messages.length > 0 ? messages[messages.length - 1].role : 'none'
     });
 
-    if (!settings.speechEnabled || !messages.length) return;
+    if (!settings.speechEnabled || !messages.length || isLoading) return;
 
-    const lastMessage = messages[messages.length - 1];
-    console.log('🔍 Checking message for speech:', { 
-      role: lastMessage.role, 
-      content: lastMessage.content.slice(0, 30),
+    // Find the LAST ASSISTANT MESSAGE (ignore system messages that may come after)
+    const lastAssistantMessage = [...messages].reverse().find(msg => msg.role === "assistant");
+    
+    console.log('🔍 Looking for last assistant message:', {
+      found: !!lastAssistantMessage,
+      content: lastAssistantMessage ? lastAssistantMessage.content.slice(0, 30) : 'none',
       isLoading,
       speechEnabled: settings.speechEnabled 
     });
 
-    if (lastMessage.role === "assistant" && !isLoading) {
+    if (lastAssistantMessage) {
       // Prevent duplicate speech synthesis for the same message
-      const messageKey = `${lastMessage.content}-${messages.length}`;
+      const messageKey = `${lastAssistantMessage.content}-${messages.length}`;
       if (lastSpokenMessageRef.current !== messageKey) {
         lastSpokenMessageRef.current = messageKey;
-        console.log('🎙️ SPEAKING ASSISTANT MESSAGE:', lastMessage.content.slice(0, 50) + '...');
+        console.log('🎙️ SPEAKING ASSISTANT MESSAGE:', lastAssistantMessage.content.slice(0, 50) + '...');
         // Immediate speech synthesis with no delay
-        speak(lastMessage.content);
+        speak(lastAssistantMessage.content);
       } else {
         console.log('⚠️ Skipping duplicate speech synthesis');
       }
     } else {
-      console.log('❌ Not speaking because:', { 
-        role: lastMessage.role, 
-        isLoading, 
-        isAssistant: lastMessage.role === "assistant",
-        condition: lastMessage.role === "assistant" && !isLoading 
-      });
+      console.log('❌ No assistant message found to speak');
     }
   }, [messages, settings.speechEnabled, speak, isLoading]);
 
