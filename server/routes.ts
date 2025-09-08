@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { generateChatResponse, translateText, analyzeImage } from "./openai";
 import { voiceProfileStorage, analyzeVoiceInput, type VoiceProfile } from "./voiceProfiles";
 import { ObjectStorageService } from "./objectStorage";
+import { reminderService } from "./reminderService";
 import { insertMessageSchema, insertUserSettingsSchema } from "@shared/schema";
 import { z } from "zod";
 
@@ -94,6 +95,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Reminder and planning endpoints
+  app.get("/api/reminders/due", async (req, res) => {
+    try {
+      const dueReminders = await reminderService.getDueReminders();
+      res.json(dueReminders);
+    } catch (error) {
+      console.error("Error getting due reminders:", error);
+      res.status(500).json({ error: "Failed to get due reminders" });
+    }
+  });
+
+  app.get("/api/reminders/check", async (req, res) => {
+    try {
+      const notifications = await reminderService.checkAndNotifyDueReminders();
+      res.json({ notifications });
+    } catch (error) {
+      console.error("Error checking reminders:", error);
+      res.status(500).json({ error: "Failed to check reminders" });
+    }
+  });
+
+  app.get("/api/plans/today", async (req, res) => {
+    try {
+      const todaysPlan = await reminderService.getTodaysPlan();
+      res.json(todaysPlan);
+    } catch (error) {
+      console.error("Error getting today's plan:", error);
+      res.status(500).json({ error: "Failed to get today's plan" });
+    }
+  });
+
   // Chat endpoint
   app.post("/api/chat", async (req, res) => {
     try {
@@ -101,6 +133,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!message || typeof message !== "string") {
         return res.status(400).json({ error: "Message is required" });
+      }
+
+      // Check for reminder or planning requests first
+      const reminderParseResult = await reminderService.parseReminderCommand(message);
+      
+      if (reminderParseResult.hasReminder || reminderParseResult.hasPlanningRequest) {
+        const reminderResponse = await reminderService.processReminderRequest(message);
+        
+        // Save user message and reminder response
+        if (conversationId) {
+          await storage.createMessage({
+            conversationId,
+            role: "user",
+            content: message,
+            metadata: null
+          });
+
+          await storage.createMessage({
+            conversationId,
+            role: "assistant",
+            content: reminderResponse,
+            metadata: {
+              isReminderResponse: true,
+              reminderType: reminderParseResult.hasPlanningRequest ? 'planning' : 'reminder'
+            }
+          });
+        }
+
+        return res.json({
+          response: reminderResponse,
+          searchUsed: false,
+          translationUsed: false,
+          isReminderResponse: true
+        });
       }
 
       // Get conversation history
