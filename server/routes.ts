@@ -126,6 +126,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/plans/:date", async (req, res) => {
+    try {
+      const { date } = req.params;
+      
+      // Validate date format (YYYY-MM-DD)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD" });
+      }
+
+      const plan = await reminderService.getPlanForDate(date);
+      res.json(plan);
+    } catch (error) {
+      console.error(`Error getting plan for ${req.params.date}:`, error);
+      res.status(500).json({ error: "Failed to get plan for specified date" });
+    }
+  });
+
   // Chat endpoint
   app.post("/api/chat", async (req, res) => {
     try {

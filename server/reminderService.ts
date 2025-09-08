@@ -13,6 +13,7 @@ export interface ReminderParseResult {
   hasPlanningRequest?: boolean;
   planningType?: 'create_plan' | 'add_activity' | 'view_plan';
   planningDetails?: any;
+  requestedDate?: string; // YYYY-MM-DD format
 }
 
 export class ReminderService {
@@ -33,13 +34,15 @@ export class ReminderService {
       Examples:
       - "remind me at 3pm to call mom" → hasReminder: true, reminderMessage: "call mom", reminderTime: today at 3pm (or tomorrow if 3pm has passed)
       - "remind me in 30 minutes to take medication" → hasReminder: true, reminderMessage: "take medication", reminderTime: 30 minutes from now
-      - "plan my day" → hasPlanningRequest: true, planningType: "create_plan"
-      - "add go to gym at 6pm to my plan" → hasPlanningRequest: true, planningType: "add_activity", planningDetails: {activity: "go to gym", time: "6pm"}
-      - "add to my planner for today to call doctor" → hasPlanningRequest: true, planningType: "add_activity", planningDetails: {activity: "call doctor"}
-      - "put in my planner meeting at 2pm" → hasPlanningRequest: true, planningType: "add_activity", planningDetails: {activity: "meeting", time: "2pm"}
-      - "what's on my schedule today" → hasPlanningRequest: true, planningType: "view_plan"
-      - "show me my daily activities" → hasPlanningRequest: true, planningType: "view_plan"
-      - "what am I supposed to do today" → hasPlanningRequest: true, planningType: "view_plan"
+      - "plan my day" → hasPlanningRequest: true, planningType: "create_plan", requestedDate: "today's date"
+      - "plan tomorrow" → hasPlanningRequest: true, planningType: "create_plan", requestedDate: "tomorrow's date"
+      - "add go to gym at 6pm to my plan" → hasPlanningRequest: true, planningType: "add_activity", planningDetails: {activity: "go to gym", time: "6pm"}, requestedDate: "today's date"
+      - "add meeting tomorrow at 2pm" → hasPlanningRequest: true, planningType: "add_activity", planningDetails: {activity: "meeting", time: "2pm"}, requestedDate: "tomorrow's date"
+      - "what's on my schedule today" → hasPlanningRequest: true, planningType: "view_plan", requestedDate: "today's date"
+      - "what did I do yesterday" → hasPlanningRequest: true, planningType: "view_plan", requestedDate: "yesterday's date"
+      - "show me next Monday's activities" → hasPlanningRequest: true, planningType: "view_plan", requestedDate: "next Monday's date"
+      - "what am I supposed to do on Friday" → hasPlanningRequest: true, planningType: "view_plan", requestedDate: "this Friday's date"
+      - "plan next week" → hasPlanningRequest: true, planningType: "create_plan", requestedDate: "next Monday's date"
 
       IMPORTANT: If someone asks for a time that has already passed today (like 2pm when it's currently 6pm), 
       set the reminder for that time TOMORROW, not today.
@@ -261,15 +264,13 @@ export class ReminderService {
     }
   }
 
-  // Get today's plan
-  async getTodaysPlan(): Promise<{ plan: any; activities: any[] } | null> {
+  // Get plan for any specific date
+  async getPlanForDate(date: string): Promise<{ plan: any; activities: any[] } | null> {
     try {
-      const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-      
       const [plan] = await db
         .select()
         .from(dailyPlans)
-        .where(eq(dailyPlans.date, today));
+        .where(eq(dailyPlans.date, date));
 
       if (!plan) return null;
 
@@ -280,8 +281,39 @@ export class ReminderService {
 
       return { plan, activities };
     } catch (error) {
-      console.error("Error getting today's plan:", error);
+      console.error(`Error getting plan for ${date}:`, error);
       return null;
+    }
+  }
+
+  // Get today's plan (convenience method)
+  async getTodaysPlan(): Promise<{ plan: any; activities: any[] } | null> {
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    return this.getPlanForDate(today);
+  }
+
+  // Parse relative dates like "tomorrow", "yesterday", "next Monday"
+  private parseRelativeDate(dateStr: string): string {
+    const today = new Date();
+    
+    switch (dateStr.toLowerCase()) {
+      case 'today':
+        return today.toISOString().split('T')[0];
+      
+      case 'tomorrow':
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        return tomorrow.toISOString().split('T')[0];
+      
+      case 'yesterday':
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        return yesterday.toISOString().split('T')[0];
+      
+      default:
+        // For now, return today for unrecognized dates
+        // In the future, we could add more sophisticated date parsing
+        return today.toISOString().split('T')[0];
     }
   }
 
@@ -297,41 +329,48 @@ export class ReminderService {
     }
 
     if (parseResult.hasPlanningRequest) {
-      const today = new Date().toISOString().split('T')[0];
+      // Determine the target date
+      const targetDate = parseResult.requestedDate 
+        ? this.parseRelativeDate(parseResult.requestedDate)
+        : new Date().toISOString().split('T')[0];
+      
+      const isToday = targetDate === new Date().toISOString().split('T')[0];
+      const dateLabel = this.getDateLabel(targetDate);
       
       switch (parseResult.planningType) {
         case 'create_plan':
-          return await this.createDailyPlan(today, "Daily Plan", "Your plan for today");
+          const planTitle = isToday ? "Daily Plan" : `Plan for ${dateLabel}`;
+          const planDescription = isToday ? "Your plan for today" : `Your plan for ${dateLabel}`;
+          return await this.createDailyPlan(targetDate, planTitle, planDescription);
         
         case 'view_plan':
-          const todaysPlan = await this.getTodaysPlan();
-          if (!todaysPlan) {
-            return "You don't have any plans for today yet. Would you like me to help you create one?";
+          const requestedPlan = await this.getPlanForDate(targetDate);
+          if (!requestedPlan) {
+            return `You don't have any plans for ${dateLabel} yet. Would you like me to help you create one?`;
           }
           
-          let planText = `Here's your plan for today:\n${todaysPlan.plan.title}`;
-          if (todaysPlan.activities.length > 0) {
+          let planText = `Here's your plan for ${dateLabel}:\n${requestedPlan.plan.title}`;
+          if (requestedPlan.activities.length > 0) {
             planText += "\n\nActivities:";
-            todaysPlan.activities.forEach((activity: any) => {
+            requestedPlan.activities.forEach((activity: any) => {
               planText += `\n- ${activity.activity}${activity.time ? ` at ${activity.time}` : ''}${activity.completed ? ' ✓' : ''}`;
             });
+          } else {
+            planText += "\n\nNo activities planned yet.";
           }
           return planText;
         
         case 'add_activity':
-          const plan = await this.getTodaysPlan();
+          let plan = await this.getPlanForDate(targetDate);
           if (!plan) {
             // Create a plan first
-            await this.createDailyPlan(today, "Daily Plan", "Your plan for today");
-            const newPlan = await this.getTodaysPlan();
-            if (newPlan && parseResult.planningDetails?.activity) {
-              return await this.addActivityToPlan(
-                newPlan.plan.id,
-                parseResult.planningDetails.activity,
-                parseResult.planningDetails.time
-              );
-            }
-          } else if (parseResult.planningDetails?.activity) {
+            const planTitle = isToday ? "Daily Plan" : `Plan for ${dateLabel}`;
+            const planDescription = isToday ? "Your plan for today" : `Your plan for ${dateLabel}`;
+            await this.createDailyPlan(targetDate, planTitle, planDescription);
+            plan = await this.getPlanForDate(targetDate);
+          }
+          
+          if (plan && parseResult.planningDetails?.activity) {
             return await this.addActivityToPlan(
               plan.plan.id,
               parseResult.planningDetails.activity,
@@ -343,6 +382,31 @@ export class ReminderService {
     }
 
     return "I didn't detect a reminder or planning request in that message.";
+  }
+
+  // Get a human-readable date label
+  private getDateLabel(dateStr: string): string {
+    const date = new Date(dateStr);
+    const today = new Date();
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+
+    if (dateStr === today.toISOString().split('T')[0]) {
+      return 'today';
+    } else if (dateStr === tomorrow.toISOString().split('T')[0]) {
+      return 'tomorrow';
+    } else if (dateStr === yesterday.toISOString().split('T')[0]) {
+      return 'yesterday';
+    } else {
+      return date.toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        month: 'long', 
+        day: 'numeric',
+        year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined
+      });
+    }
   }
 
   // Check for due reminders (called periodically)
