@@ -33,6 +33,16 @@ The server is implemented using Express.js with TypeScript, following a RESTful 
 ### AI Integration
 The system integrates with OpenAI's GPT-5 model for natural language processing and conversation generation. The AI service handles multi-language support, web search result integration, and contextual response generation based on conversation history.
 
+**ElevenLabs Voice Integration (Added October 2025):**
+The application now supports custom voice synthesis using ElevenLabs API for high-quality text-to-speech:
+- Backend service (`server/elevenLabsService.ts`) handles TTS generation and voice management
+- API endpoints: `/api/elevenlabs/voices`, `/api/elevenlabs/tts`, `/api/elevenlabs/usage`
+- Frontend VoiceSettings component allows users to select and test custom voices
+- Voice parameters (stability, similarity boost) are persisted to localStorage
+- Graceful fallback to browser TTS if ElevenLabs is unavailable
+- Manual voice ID entry supported for free-tier API keys with limited permissions
+- Integration maintains compatibility with existing wake word detection and speech features
+
 ### Data Storage Solutions
 Currently implements an in-memory storage system with well-defined interfaces for:
 - User management and authentication
@@ -53,6 +63,7 @@ Implements a sophisticated object storage system using Google Cloud Storage with
 
 ### Core Services
 - **OpenAI API**: Primary AI service for conversation generation and image analysis
+- **ElevenLabs API**: High-quality voice synthesis and text-to-speech (added October 2025)
 - **Google Cloud Storage**: Object storage for file uploads and management
 - **Neon Database**: PostgreSQL database service (configured but not actively used)
 

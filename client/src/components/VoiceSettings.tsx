@@ -6,8 +6,9 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Volume2, AlertCircle, CheckCircle2, Info } from "lucide-react";
+import { Volume2, AlertCircle, CheckCircle2, Info, HelpCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { Input } from "@/components/ui/input";
 
 interface ElevenLabsVoice {
   voiceId: string;
@@ -44,14 +45,22 @@ export function VoiceSettings({
   const [stability, setStability] = useState([0.5]);
   const [similarityBoost, setSimilarityBoost] = useState([0.75]);
   const [isTestingVoice, setIsTestingVoice] = useState(false);
+  const [showManualInput, setShowManualInput] = useState(false);
+  const [manualVoiceId, setManualVoiceId] = useState("");
 
-  // Load saved voice parameters on mount
+  // Load saved voice parameters and ID on mount
   useEffect(() => {
     const savedParams = localStorage.getItem("bertha_voice_params");
     if (savedParams) {
       const params = JSON.parse(savedParams);
       setStability([params.stability || 0.5]);
       setSimilarityBoost([params.similarityBoost || 0.75]);
+    }
+    
+    const savedVoiceId = localStorage.getItem("bertha_voice_id");
+    if (savedVoiceId) {
+      setLocalVoiceId(savedVoiceId);
+      setManualVoiceId(savedVoiceId);
     }
   }, []);
 
@@ -160,16 +169,25 @@ export function VoiceSettings({
     return "text-green-500";
   };
 
-  if (voicesError) {
-    return (
-      <Alert variant="destructive">
-        <AlertCircle className="h-4 w-4" />
-        <AlertDescription>
-          ElevenLabs is not configured. Please add your API key to enable custom voices.
-        </AlertDescription>
-      </Alert>
-    );
-  }
+  const handleManualVoiceId = () => {
+    if (!manualVoiceId.trim()) {
+      toast({
+        title: "Invalid Voice ID",
+        description: "Please enter a valid voice ID.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    handleVoiceChange(manualVoiceId.trim());
+    setShowManualInput(false);
+  };
+
+  // Check if we have permission issues (free tier limitation)
+  const hasPermissionError = voicesError && 
+    (voicesError as any)?.message?.includes("permission") || 
+    (voicesError as any)?.message?.includes("403") ||
+    (voicesError as any)?.message?.includes("401");
 
   return (
     <div className="space-y-6">
@@ -184,8 +202,70 @@ export function VoiceSettings({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {voicesLoading ? (
+          {hasPermissionError ? (
+            <Alert>
+              <Info className="h-4 w-4" />
+              <AlertDescription className="space-y-3">
+                <p className="text-sm">
+                  Your ElevenLabs API key has limited permissions. You can manually enter a voice ID from your{" "}
+                  <a 
+                    href="https://elevenlabs.io/app/voice-library" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="underline hover:text-primary"
+                  >
+                    ElevenLabs Voice Library
+                  </a>.
+                </p>
+                
+                {!showManualInput ? (
+                  <Button 
+                    onClick={() => setShowManualInput(true)}
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    data-testid="button-show-manual-input"
+                  >
+                    <HelpCircle className="mr-2 h-4 w-4" />
+                    Enter Voice ID Manually
+                  </Button>
+                ) : (
+                  <div className="space-y-2">
+                    <Label htmlFor="manual-voice-id" className="text-sm">Voice ID</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        id="manual-voice-id"
+                        placeholder="e.g., 21m00Tcm4TlvDq8ikWAM"
+                        value={manualVoiceId}
+                        onChange={(e) => setManualVoiceId(e.target.value)}
+                        data-testid="input-manual-voice-id"
+                      />
+                      <Button 
+                        onClick={handleManualVoiceId}
+                        size="sm"
+                        data-testid="button-save-manual-voice"
+                      >
+                        Save
+                      </Button>
+                    </div>
+                    {localVoiceId && (
+                      <p className="text-xs text-muted-foreground">
+                        Current: {localVoiceId}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </AlertDescription>
+            </Alert>
+          ) : voicesLoading ? (
             <div className="text-sm text-muted-foreground">Loading voices...</div>
+          ) : voicesError ? (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                ElevenLabs is not configured. Please add your API key to enable custom voices.
+              </AlertDescription>
+            </Alert>
           ) : (
             <>
               <div className="space-y-2">
@@ -211,18 +291,20 @@ export function VoiceSettings({
                   </SelectContent>
                 </Select>
               </div>
-
-              <Button 
-                onClick={handleTestVoice} 
-                disabled={!localVoiceId || isTestingVoice}
-                variant="outline"
-                className="w-full"
-                data-testid="button-test-voice"
-              >
-                <Volume2 className="mr-2 h-4 w-4" />
-                {isTestingVoice ? "Playing..." : "Test Voice"}
-              </Button>
             </>
+          )}
+
+          {localVoiceId && (
+            <Button 
+              onClick={handleTestVoice} 
+              disabled={isTestingVoice}
+              variant="outline"
+              className="w-full"
+              data-testid="button-test-voice"
+            >
+              <Volume2 className="mr-2 h-4 w-4" />
+              {isTestingVoice ? "Playing..." : "Test Voice"}
+            </Button>
           )}
 
           {showAdvancedSettings && (
