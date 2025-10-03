@@ -20,8 +20,84 @@ export function useSpeech() {
     resumeWakeWordRef.current = resumeCallback;
   }, []);
 
-  // Text-to-Speech with Cameroon grandmother voice characteristics
-  const speak = useCallback((text: string, rate: number = 0.8) => {
+  // Text-to-Speech with ElevenLabs or fallback to browser TTS
+  const speak = useCallback(async (text: string, rate: number = 0.8) => {
+    // Check if ElevenLabs voice is selected
+    const elevenLabsVoiceId = localStorage.getItem("bertha_voice_id");
+    
+    if (elevenLabsVoiceId) {
+      // Use ElevenLabs TTS
+      try {
+        setIsSpeaking(true);
+        console.log(`🔊 Speaking with ElevenLabs voice: ${elevenLabsVoiceId}`);
+        
+        const response = await fetch("/api/elevenlabs/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text,
+            voiceId: elevenLabsVoiceId,
+            stability: 0.5,
+            similarityBoost: 0.75,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to generate speech");
+        }
+
+        const audioBlob = await response.blob();
+        const audioUrl = URL.createObjectURL(audioBlob);
+        const audio = new Audio(audioUrl);
+        
+        audio.onplay = () => {
+          console.log('🔊 ElevenLabs audio playing - KEEPING wake word detection ACTIVE for interruption');
+        };
+        
+        audio.onended = () => {
+          setIsSpeaking(false);
+          URL.revokeObjectURL(audioUrl);
+          console.log('🔇 ElevenLabs speech completed');
+          
+          // Add grace period to ignore speech recognition
+          (window as any).berthaJustFinishedSpeaking = true;
+          console.log('⏸️ Setting 4-second grace period to ignore audio feedback');
+          
+          setTimeout(() => {
+            (window as any).berthaJustFinishedSpeaking = false;
+            console.log('✅ Grace period ended - wake word detection fully active');
+          }, 4000);
+        };
+        
+        audio.onerror = (error) => {
+          setIsSpeaking(false);
+          URL.revokeObjectURL(audioUrl);
+          console.error('ElevenLabs audio playback error:', error);
+          
+          // Fallback to browser TTS
+          console.log('Falling back to browser TTS');
+          speakWithBrowserTTS(text, rate);
+        };
+        
+        await audio.play();
+        return;
+      } catch (error) {
+        console.error('Error using ElevenLabs TTS:', error);
+        setIsSpeaking(false);
+        
+        // Fallback to browser TTS
+        console.log('Falling back to browser TTS');
+        speakWithBrowserTTS(text, rate);
+        return;
+      }
+    }
+    
+    // Use browser TTS if no ElevenLabs voice selected
+    speakWithBrowserTTS(text, rate);
+  }, [toast]);
+
+  // Browser TTS fallback function
+  const speakWithBrowserTTS = useCallback((text: string, rate: number = 0.8) => {
     if ('speechSynthesis' in window) {
       // Check if speech synthesis has been initialized with user interaction
       if (!(window as any).speechSynthesisInitialized) {

@@ -11,6 +11,7 @@ import { X, Upload, User } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { VoiceProfileManager } from "../voice/VoiceProfileManager";
+import { VoiceSettings } from "../VoiceSettings";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -229,6 +230,13 @@ export default function SettingsModal({ isOpen, onClose, onBackgroundChange }: S
                 />
               </div>
             </div>
+          </div>
+
+          <Separator />
+
+          {/* ElevenLabs Voice Settings */}
+          <div>
+            <VoiceSettings showAdvancedSettings={false} />
           </div>
 
           <Separator />
