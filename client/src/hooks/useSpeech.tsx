@@ -31,14 +31,18 @@ export function useSpeech() {
         setIsSpeaking(true);
         console.log(`🔊 Speaking with ElevenLabs voice: ${elevenLabsVoiceId}`);
         
+        // Load voice parameters from localStorage
+        const savedParams = localStorage.getItem("bertha_voice_params");
+        const voiceParams = savedParams ? JSON.parse(savedParams) : { stability: 0.5, similarityBoost: 0.75 };
+        
         const response = await fetch("/api/elevenlabs/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             text,
             voiceId: elevenLabsVoiceId,
-            stability: 0.5,
-            similarityBoost: 0.75,
+            stability: voiceParams.stability,
+            similarityBoost: voiceParams.similarityBoost,
           }),
         });
 

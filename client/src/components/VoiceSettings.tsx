@@ -45,6 +45,16 @@ export function VoiceSettings({
   const [similarityBoost, setSimilarityBoost] = useState([0.75]);
   const [isTestingVoice, setIsTestingVoice] = useState(false);
 
+  // Load saved voice parameters on mount
+  useEffect(() => {
+    const savedParams = localStorage.getItem("bertha_voice_params");
+    if (savedParams) {
+      const params = JSON.parse(savedParams);
+      setStability([params.stability || 0.5]);
+      setSimilarityBoost([params.similarityBoost || 0.75]);
+    }
+  }, []);
+
   // Fetch available voices
   const { data: voicesData, isLoading: voicesLoading, error: voicesError } = useQuery<{ voices: ElevenLabsVoice[] }>({
     queryKey: ["/api/elevenlabs/voices"],
@@ -75,6 +85,15 @@ export function VoiceSettings({
       description: "Bertha's voice has been updated successfully.",
     });
   };
+
+  // Save voice parameters whenever they change
+  useEffect(() => {
+    const params = {
+      stability: stability[0],
+      similarityBoost: similarityBoost[0],
+    };
+    localStorage.setItem("bertha_voice_params", JSON.stringify(params));
+  }, [stability, similarityBoost]);
 
   const handleTestVoice = async () => {
     if (!localVoiceId) {
