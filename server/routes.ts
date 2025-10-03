@@ -6,6 +6,7 @@ import { voiceProfileStorage, analyzeVoiceInput, type VoiceProfile } from "./voi
 import { ObjectStorageService } from "./objectStorage";
 import { reminderService } from "./reminderService";
 import { WeatherService } from "./weatherService";
+import { elevenLabsService } from "./elevenLabsService";
 import { insertMessageSchema, insertUserSettingsSchema } from "@shared/schema";
 import { z } from "zod";
 
@@ -229,6 +230,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error getting weather forecast:", error);
       res.status(500).json({ error: "Failed to get weather forecast" });
+    }
+  });
+
+  // ElevenLabs voice endpoints
+  app.get("/api/elevenlabs/voices", async (req, res) => {
+    try {
+      if (!process.env.ELEVENLABS_API_KEY) {
+        return res.status(503).json({ 
+          error: "ElevenLabs is not configured. Please add ELEVENLABS_API_KEY to use custom voices." 
+        });
+      }
+
+      const voices = await elevenLabsService.listVoices();
+      res.json({ voices });
+    } catch (error) {
+      console.error("Error listing ElevenLabs voices:", error);
+      res.status(500).json({ error: "Failed to fetch voices" });
+    }
+  });
+
+  app.post("/api/elevenlabs/tts", async (req, res) => {
+    try {
+      if (!process.env.ELEVENLABS_API_KEY) {
+        return res.status(503).json({ 
+          error: "ElevenLabs is not configured. Please add ELEVENLABS_API_KEY to use custom voices." 
+        });
+      }
+
+      const { text, voiceId, stability, similarityBoost, style } = req.body;
+
+      if (!text || !voiceId) {
+        return res.status(400).json({ error: "Text and voiceId are required" });
+      }
+
+      const audioBuffer = await elevenLabsService.textToSpeech({
+        text,
+        voiceId,
+        stability,
+        similarityBoost,
+        style
+      });
+
+      // Set headers for audio response
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Content-Length', audioBuffer.length);
+      res.setHeader('Cache-Control', 'public, max-age=86400'); // Cache for 24 hours
+      
+      res.send(audioBuffer);
+    } catch (error) {
+      console.error("Error generating speech with ElevenLabs:", error);
+      res.status(500).json({ error: "Failed to generate speech" });
+    }
+  });
+
+  app.get("/api/elevenlabs/usage", async (req, res) => {
+    try {
+      if (!process.env.ELEVENLABS_API_KEY) {
+        return res.status(503).json({ 
+          error: "ElevenLabs is not configured. Please add ELEVENLABS_API_KEY to use custom voices." 
+        });
+      }
+
+      const stats = await elevenLabsService.getUsageStats();
+      res.json(stats);
+    } catch (error) {
+      console.error("Error getting ElevenLabs usage:", error);
+      res.status(500).json({ error: "Failed to get usage statistics" });
     }
   });
 
