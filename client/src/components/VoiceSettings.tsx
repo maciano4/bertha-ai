@@ -183,11 +183,9 @@ export function VoiceSettings({
     setShowManualInput(false);
   };
 
-  // Check if we have permission issues (free tier limitation)
-  const hasPermissionError = voicesError && 
-    (voicesError as any)?.message?.includes("permission") || 
-    (voicesError as any)?.message?.includes("403") ||
-    (voicesError as any)?.message?.includes("401");
+  // Check if we have any error fetching voices (includes permission issues, free tier limitations, etc.)
+  // If there's an error, we'll offer manual voice ID input
+  const shouldShowManualOption = !!voicesError;
 
   return (
     <div className="space-y-6">
@@ -202,12 +200,14 @@ export function VoiceSettings({
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {hasPermissionError ? (
+          {voicesLoading ? (
+            <div className="text-sm text-muted-foreground">Loading voices...</div>
+          ) : shouldShowManualOption ? (
             <Alert>
               <Info className="h-4 w-4" />
               <AlertDescription className="space-y-3">
                 <p className="text-sm">
-                  Your ElevenLabs API key has limited permissions. You can manually enter a voice ID from your{" "}
+                  Unable to load voices automatically. You can manually enter a voice ID from the{" "}
                   <a 
                     href="https://elevenlabs.io/app/voice-library" 
                     target="_blank" 
@@ -255,15 +255,6 @@ export function VoiceSettings({
                     )}
                   </div>
                 )}
-              </AlertDescription>
-            </Alert>
-          ) : voicesLoading ? (
-            <div className="text-sm text-muted-foreground">Loading voices...</div>
-          ) : voicesError ? (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
-              <AlertDescription>
-                ElevenLabs is not configured. Please add your API key to enable custom voices.
               </AlertDescription>
             </Alert>
           ) : (

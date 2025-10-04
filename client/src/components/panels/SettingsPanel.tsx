@@ -5,6 +5,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Image } from "lucide-react";
+import { VoiceSettings } from "../VoiceSettings";
 
 interface SettingsData {
   language: string;
@@ -57,94 +58,101 @@ export default function SettingsPanel({ onBackgroundChange }: SettingsPanelProps
   ];
 
   return (
-    <Card className="m-4 shadow-lg">
-      <CardHeader>
-        <CardTitle className="text-base">Settings</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Language Selection */}
-        <div className="space-y-2">
-          <Label className="text-sm text-muted-foreground">Output Language</Label>
-          <Select 
-            value={settings.language} 
-            onValueChange={(value) => updateSettings({ language: value })}
-          >
-            <SelectTrigger data-testid="select-language">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {languages.map((lang) => (
-                <SelectItem key={lang.value} value={lang.value}>
-                  {lang.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Speech Output Toggle */}
-        <div className="flex items-center justify-between">
-          <Label className="text-sm text-muted-foreground">Speech Output</Label>
-          <Switch
-            checked={settings.speechEnabled}
-            onCheckedChange={(checked) => updateSettings({ speechEnabled: checked })}
-            data-testid="switch-speech"
-          />
-        </div>
-
-        {/* Web Search Toggle */}
-        <div className="flex items-center justify-between">
-          <Label className="text-sm text-muted-foreground">Web Search</Label>
-          <Switch
-            checked={settings.searchEnabled}
-            onCheckedChange={(checked) => updateSettings({ searchEnabled: checked })}
-            data-testid="switch-search"
-          />
-        </div>
-
-        {/* Background Presets */}
-        <div className="space-y-2">
-          <Label className="text-sm text-muted-foreground">Background</Label>
-          <div className="grid grid-cols-2 gap-2">
-            {presetBackgrounds.map((bg, index) => (
-              <button
-                key={index}
-                className="aspect-square rounded-lg bg-cover bg-center hover:ring-2 hover:ring-primary transition-all"
-                style={{ backgroundImage: `url(${bg})` }}
-                onClick={() => onBackgroundChange(bg)}
-                data-testid={`button-background-${index}`}
-              />
-            ))}
+    <>
+      <Card className="m-4 shadow-lg">
+        <CardHeader>
+          <CardTitle className="text-base">Settings</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Language Selection */}
+          <div className="space-y-2">
+            <Label className="text-sm text-muted-foreground">Output Language</Label>
+            <Select 
+              value={settings.language} 
+              onValueChange={(value) => updateSettings({ language: value })}
+            >
+              <SelectTrigger data-testid="select-language">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {languages.map((lang) => (
+                  <SelectItem key={lang.value} value={lang.value}>
+                    {lang.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-        </div>
 
-        {/* Custom Background Upload */}
-        <Button
-          variant="outline"
-          className="w-full"
-          onClick={() => {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = 'image/*';
-            input.onchange = (e) => {
-              const file = (e.target as HTMLInputElement).files?.[0];
-              if (file) {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                  const result = e.target?.result as string;
-                  onBackgroundChange(result);
-                };
-                reader.readAsDataURL(file);
-              }
-            };
-            input.click();
-          }}
-          data-testid="button-upload-background"
-        >
-          <Image className="w-4 h-4 mr-2" />
-          Upload Custom Background
-        </Button>
-      </CardContent>
-    </Card>
+          {/* Speech Output Toggle */}
+          <div className="flex items-center justify-between">
+            <Label className="text-sm text-muted-foreground">Speech Output</Label>
+            <Switch
+              checked={settings.speechEnabled}
+              onCheckedChange={(checked) => updateSettings({ speechEnabled: checked })}
+              data-testid="switch-speech"
+            />
+          </div>
+
+          {/* Web Search Toggle */}
+          <div className="flex items-center justify-between">
+            <Label className="text-sm text-muted-foreground">Web Search</Label>
+            <Switch
+              checked={settings.searchEnabled}
+              onCheckedChange={(checked) => updateSettings({ searchEnabled: checked })}
+              data-testid="switch-search"
+            />
+          </div>
+
+          {/* Background Presets */}
+          <div className="space-y-2">
+            <Label className="text-sm text-muted-foreground">Background</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {presetBackgrounds.map((bg, index) => (
+                <button
+                  key={index}
+                  className="aspect-square rounded-lg bg-cover bg-center hover:ring-2 hover:ring-primary transition-all"
+                  style={{ backgroundImage: `url(${bg})` }}
+                  onClick={() => onBackgroundChange(bg)}
+                  data-testid={`button-background-${index}`}
+                />
+              ))}
+            </div>
+          </div>
+
+          {/* Custom Background Upload */}
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.accept = 'image/*';
+              input.onchange = (e) => {
+                const file = (e.target as HTMLInputElement).files?.[0];
+                if (file) {
+                  const reader = new FileReader();
+                  reader.onload = (e) => {
+                    const result = e.target?.result as string;
+                    onBackgroundChange(result);
+                  };
+                  reader.readAsDataURL(file);
+                }
+              };
+              input.click();
+            }}
+            data-testid="button-upload-background"
+          >
+            <Image className="w-4 h-4 mr-2" />
+            Upload Custom Background
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Voice Selection */}
+      <div className="m-4">
+        <VoiceSettings showAdvancedSettings={true} />
+      </div>
+    </>
   );
 }
