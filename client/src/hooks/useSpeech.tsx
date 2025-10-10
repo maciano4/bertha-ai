@@ -26,7 +26,7 @@ export function useSpeech() {
           console.log('📱 Audio Context initialized for mobile');
           
           // Resume context to ensure it transitions to "running" state
-          if (audioContextRef.current.state === 'suspended') {
+          if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
             audioContextRef.current.resume().then(() => {
               console.log('📱 Audio Context resumed and running');
             }).catch((error) => {
@@ -165,6 +165,9 @@ export function useSpeech() {
 
   // Browser TTS fallback function
   const speakWithBrowserTTS = useCallback((text: string, rate: number = 0.8) => {
+    console.log('🔊 Browser TTS requested. speechSynthesis available:', 'speechSynthesis' in window);
+    console.log('🔊 speechSynthesisInitialized:', !!(window as any).speechSynthesisInitialized);
+    
     if ('speechSynthesis' in window) {
       // Check if speech synthesis has been initialized with user interaction
       if (!(window as any).speechSynthesisInitialized) {
@@ -182,11 +185,13 @@ export function useSpeech() {
       
       // iOS Safari workaround: small delay before speaking
       if (isIOS()) {
+        console.log('🍎 Using iOS Safari delay before speaking');
         setTimeout(() => speakBrowserTTSInternal(text, rate), 100);
       } else {
         speakBrowserTTSInternal(text, rate);
       }
     } else {
+      console.error('❌ speechSynthesis API not available in this browser');
       toast({
         title: "Not Supported",
         description: "Text-to-speech is not supported in this browser",
