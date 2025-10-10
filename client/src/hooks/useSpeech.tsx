@@ -604,7 +604,8 @@ export function useSpeech() {
     startWakeWordListening,
     stopWakeWordListening,
     setWakeWordCallbacks,
-    initializeSpeechSynthesis
+    initializeSpeechSynthesis,
+    initializeAudioContext
   };
 }
 

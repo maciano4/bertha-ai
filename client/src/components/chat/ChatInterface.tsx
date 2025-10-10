@@ -26,7 +26,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
   });
 
   const { messages, isLoading, sendMessage, messagesEndRef, scrollToBottom } = useChat(conversationId);
-  const { speak, stopSpeaking, isSpeaking, setWakeWordCallbacks, initializeSpeechSynthesis } = useSpeech();
+  const { speak, stopSpeaking, isSpeaking, setWakeWordCallbacks, initializeSpeechSynthesis, initializeAudioContext } = useSpeech();
   const { 
     isWakeWordListening, 
     startWakeWordListening, 
@@ -156,12 +156,16 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     };
   }, []); // Empty dependency array - only runs on mount/unmount
 
-  // Initialize speech synthesis on first user interaction
+  // Initialize speech synthesis and audio context on first user interaction
   const handleUserInteraction = useCallback(() => {
-    if (settings.speechEnabled && !(window as any).speechSynthesisInitialized) {
-      initializeSpeechSynthesis();
+    if (settings.speechEnabled) {
+      if (!(window as any).speechSynthesisInitialized) {
+        initializeSpeechSynthesis();
+      }
+      // Initialize audio context for mobile devices
+      initializeAudioContext();
     }
-  }, [settings.speechEnabled, initializeSpeechSynthesis]);
+  }, [settings.speechEnabled, initializeSpeechSynthesis, initializeAudioContext]);
 
   const toggleSpeech = () => {
     if (isSpeaking) {
@@ -171,9 +175,13 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     setSettings(newSettings);
     localStorage.setItem("bertha-settings", JSON.stringify(newSettings));
     
-    // Initialize speech synthesis when enabling speech
-    if (newSettings.speechEnabled && !(window as any).speechSynthesisInitialized) {
-      initializeSpeechSynthesis();
+    // Initialize speech synthesis and audio context when enabling speech
+    if (newSettings.speechEnabled) {
+      if (!(window as any).speechSynthesisInitialized) {
+        initializeSpeechSynthesis();
+      }
+      // Initialize audio context for mobile devices
+      initializeAudioContext();
     }
   };
 
