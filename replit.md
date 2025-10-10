@@ -43,6 +43,18 @@ The application now supports custom voice synthesis using ElevenLabs API for hig
 - Manual voice ID entry supported for free-tier API keys with limited permissions
 - Integration maintains compatibility with existing wake word detection and speech features
 
+**Mobile TTS Support (Added October 2025):**
+The application now includes comprehensive mobile device support for text-to-speech functionality:
+- **Mobile Detection**: Utility functions (`client/src/lib/mobileDetection.ts`) identify iOS, Android, and other mobile platforms
+- **Audio Context Initialization**: Web Audio API context is initialized on user interaction for mobile browsers to bypass autoplay restrictions
+- **Platform-Specific Handling**: 
+  - iOS Safari receives 100ms delay before speech synthesis to avoid browser-specific issues
+  - Android and iOS devices use mobile-optimized audio playback with `playsinline` attributes
+  - Desktop browsers use standard audio playback without special handling
+- **ElevenLabs Mobile Audio**: Audio elements are configured with mobile compatibility flags for seamless playback
+- **Browser TTS Fallback**: Enhanced mobile compatibility with device-specific voice selection and timing adjustments
+- **User Interaction Requirements**: Audio systems initialize automatically when users interact with the chat interface
+
 ### Data Storage Solutions
 Currently implements an in-memory storage system with well-defined interfaces for:
 - User management and authentication

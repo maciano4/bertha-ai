@@ -24,6 +24,15 @@ export function useSpeech() {
         if (AudioContextClass) {
           audioContextRef.current = new AudioContextClass();
           console.log('📱 Audio Context initialized for mobile');
+          
+          // Resume context to ensure it transitions to "running" state
+          if (audioContextRef.current.state === 'suspended') {
+            audioContextRef.current.resume().then(() => {
+              console.log('📱 Audio Context resumed and running');
+            }).catch((error) => {
+              console.warn('Failed to resume Audio Context:', error);
+            });
+          }
         }
       } catch (error) {
         console.warn('Failed to initialize Audio Context:', error);
@@ -160,6 +169,11 @@ export function useSpeech() {
       // Check if speech synthesis has been initialized with user interaction
       if (!(window as any).speechSynthesisInitialized) {
         console.log('⚠️ Speech synthesis not initialized - requiring user interaction first');
+        toast({
+          title: "Audio Not Ready",
+          description: "Please click or tap anywhere on the page to enable audio playback",
+          variant: "default"
+        });
         return;
       }
       
