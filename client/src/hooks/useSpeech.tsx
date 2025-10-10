@@ -192,10 +192,17 @@ export function useSpeech() {
       }
     } else {
       console.error('❌ speechSynthesis API not available in this browser');
+      
+      // Check if we're in a webview (like Replit mobile app)
+      const isWebView = /wv|WebView|Replit/i.test(navigator.userAgent);
+      
       toast({
-        title: "Not Supported",
-        description: "Text-to-speech is not supported in this browser",
-        variant: "destructive"
+        title: "Voice Not Available",
+        description: isWebView 
+          ? "For voice support, please open this app in your phone's browser (Chrome, Safari, etc.) instead of the Replit app"
+          : "Text-to-speech is not supported in this browser. Try using Chrome or Safari",
+        variant: "default",
+        duration: 8000
       });
     }
   }, [toast]);

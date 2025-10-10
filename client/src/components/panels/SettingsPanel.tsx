@@ -4,8 +4,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Image } from "lucide-react";
+import { Image, ExternalLink, Info } from "lucide-react";
 import { VoiceSettings } from "../VoiceSettings";
+import { useToast } from "@/hooks/use-toast";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 interface SettingsData {
   language: string;
@@ -19,12 +21,33 @@ interface SettingsPanelProps {
 }
 
 export default function SettingsPanel({ onBackgroundChange }: SettingsPanelProps) {
+  const { toast } = useToast();
   const [settings, setSettings] = useState<SettingsData>({
     language: "en",
     speechEnabled: false,
     searchEnabled: true,
     voiceSpeed: "1"
   });
+  
+  // Detect if user is in webview (like Replit app)
+  const isWebView = typeof window !== 'undefined' && (/wv|WebView|Replit/i.test(navigator.userAgent) || !('speechSynthesis' in window));
+  const appUrl = typeof window !== 'undefined' ? window.location.href : '';
+  
+  const copyUrlToClipboard = () => {
+    navigator.clipboard.writeText(appUrl).then(() => {
+      toast({
+        title: "Link Copied!",
+        description: "Paste this link in your phone's browser (Chrome or Safari)",
+        duration: 3000
+      });
+    }).catch(() => {
+      toast({
+        title: "Could not copy",
+        description: appUrl,
+        duration: 5000
+      });
+    });
+  };
 
   // Load settings from localStorage
   useEffect(() => {
@@ -64,6 +87,30 @@ export default function SettingsPanel({ onBackgroundChange }: SettingsPanelProps
           <CardTitle className="text-base">Settings</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Webview Warning for Voice Support */}
+          {isWebView && (
+            <Alert className="border-amber-500/50 bg-amber-500/10">
+              <Info className="h-4 w-4 text-amber-600" />
+              <AlertDescription className="text-sm">
+                <div className="space-y-2">
+                  <p className="font-medium">Voice features need a regular browser</p>
+                  <p className="text-xs text-muted-foreground">
+                    The Replit app doesn't support voice. For full voice features, open this app in Chrome or Safari.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-2 w-full"
+                    onClick={copyUrlToClipboard}
+                  >
+                    <ExternalLink className="mr-2 h-3 w-3" />
+                    Copy Link to Open in Browser
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+          
           {/* Language Selection */}
           <div className="space-y-2">
             <Label className="text-sm text-muted-foreground">Output Language</Label>
