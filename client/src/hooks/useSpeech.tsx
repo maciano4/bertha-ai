@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { isMobileDevice, isIOS, isAndroid } from "@/lib/mobileDetection";
 
 export function useSpeech() {
   const [isListening, setIsListening] = useState(false);
@@ -12,7 +13,77 @@ export function useSpeech() {
   const onWakeWordDetectedRef = useRef<(() => void) | null>(null);
   const pauseWakeWordRef = useRef<(() => void) | null>(null);
   const resumeWakeWordRef = useRef<(() => void) | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
   const { toast } = useToast();
+
+  // Initialize Audio Context for mobile devices
+  const initializeAudioContext = useCallback(() => {
+    if (!audioContextRef.current && (isMobileDevice() || isIOS())) {
+      try {
+        const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextClass) {
+          audioContextRef.current = new AudioContextClass();
+          console.log('📱 Audio Context initialized for mobile');
+        }
+      } catch (error) {
+        console.warn('Failed to initialize Audio Context:', error);
+      }
+    }
+  }, []);
+
+  // Play audio with mobile support
+  const playAudioWithMobileSupport = useCallback(async (audioUrl: string): Promise<void> => {
+    return new Promise((resolve, reject) => {
+      const audio = new Audio(audioUrl);
+      
+      // Mobile-specific configurations
+      if (isMobileDevice()) {
+        audio.setAttribute('playsinline', 'true');
+        audio.setAttribute('webkit-playsinline', 'true');
+      }
+      
+      audio.onplay = () => {
+        console.log('🔊 Audio playing (mobile-compatible)');
+      };
+      
+      audio.onended = () => {
+        setIsSpeaking(false);
+        URL.revokeObjectURL(audioUrl);
+        console.log('🔇 Audio completed');
+        
+        // Add grace period
+        (window as any).berthaJustFinishedSpeaking = true;
+        console.log('⏸️ Setting 4-second grace period');
+        
+        setTimeout(() => {
+          (window as any).berthaJustFinishedSpeaking = false;
+          console.log('✅ Grace period ended');
+        }, 4000);
+        
+        resolve();
+      };
+      
+      audio.onerror = (error) => {
+        setIsSpeaking(false);
+        URL.revokeObjectURL(audioUrl);
+        console.error('Audio playback error:', error);
+        reject(error);
+      };
+      
+      // Attempt to play
+      const playPromise = audio.play();
+      
+      if (playPromise !== undefined) {
+        playPromise.catch((error) => {
+          console.error('Audio play failed:', error);
+          if (error.name === 'NotAllowedError' || error.name === 'NotSupportedError') {
+            console.log('📱 Mobile autoplay blocked - will retry on next user interaction');
+          }
+          reject(error);
+        });
+      }
+    });
+  }, []);
 
   // Set wake word pause/resume callbacks
   const setWakeWordCallbacks = useCallback((pauseCallback: () => void, resumeCallback: () => void) => {
@@ -52,38 +123,21 @@ export function useSpeech() {
 
         const audioBlob = await response.blob();
         const audioUrl = URL.createObjectURL(audioBlob);
-        const audio = new Audio(audioUrl);
         
-        audio.onplay = () => {
-          console.log('🔊 ElevenLabs audio playing - KEEPING wake word detection ACTIVE for interruption');
-        };
+        // Initialize audio context for mobile if needed
+        if (isMobileDevice()) {
+          initializeAudioContext();
+        }
         
-        audio.onended = () => {
-          setIsSpeaking(false);
-          URL.revokeObjectURL(audioUrl);
-          console.log('🔇 ElevenLabs speech completed');
-          
-          // Add grace period to ignore speech recognition
-          (window as any).berthaJustFinishedSpeaking = true;
-          console.log('⏸️ Setting 4-second grace period to ignore audio feedback');
-          
-          setTimeout(() => {
-            (window as any).berthaJustFinishedSpeaking = false;
-            console.log('✅ Grace period ended - wake word detection fully active');
-          }, 4000);
-        };
-        
-        audio.onerror = (error) => {
-          setIsSpeaking(false);
-          URL.revokeObjectURL(audioUrl);
-          console.error('ElevenLabs audio playback error:', error);
-          
+        // Use mobile-friendly audio playback
+        try {
+          await playAudioWithMobileSupport(audioUrl);
+        } catch (playError) {
+          console.error('Mobile audio playback failed:', playError);
           // Fallback to browser TTS
           console.log('Falling back to browser TTS');
           speakWithBrowserTTS(text, rate);
-        };
-        
-        await audio.play();
+        }
         return;
       } catch (error) {
         console.error('Error using ElevenLabs TTS:', error);
@@ -111,6 +165,25 @@ export function useSpeech() {
       
       // Cancel any ongoing speech
       window.speechSynthesis.cancel();
+      
+      // iOS Safari workaround: small delay before speaking
+      if (isIOS()) {
+        setTimeout(() => speakBrowserTTSInternal(text, rate), 100);
+      } else {
+        speakBrowserTTSInternal(text, rate);
+      }
+    } else {
+      toast({
+        title: "Not Supported",
+        description: "Text-to-speech is not supported in this browser",
+        variant: "destructive"
+      });
+    }
+  }, [toast]);
+
+  // Internal browser TTS function
+  const speakBrowserTTSInternal = useCallback((text: string, rate: number = 0.8) => {
+    if (!('speechSynthesis' in window)) return;
       
       // Function to actually speak with proper voice selection
       const doSpeak = (voiceList: SpeechSynthesisVoice[]) => {
@@ -215,14 +288,7 @@ export function useSpeech() {
           }
         }, 300);
       }
-    } else {
-      toast({
-        title: "Not Supported",
-        description: "Text-to-speech is not supported in this browser",
-        variant: "destructive"
-      });
-    }
-  }, [toast]);
+  }, []);
 
   // Initialize speech synthesis with user interaction
   const initializeSpeechSynthesis = useCallback(() => {
