@@ -9,6 +9,8 @@ import { WeatherService } from "./weatherService";
 import { elevenLabsService } from "./elevenLabsService";
 import { insertMessageSchema, insertUserSettingsSchema } from "@shared/schema";
 import { z } from "zod";
+import multer from "multer";
+import { registerAppointmentRoutes, handleAppointmentChat } from "./appointments";
 
 // Simple web search using Google (fallback implementation)
 async function performWebSearch(query: string): Promise<string> {
@@ -23,6 +25,19 @@ async function performWebSearch(query: string): Promise<string> {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  registerAppointmentRoutes(app);
+  // Conversation identifiers alone must never grant access to another visitor's history.
+  app.use("/api", async (req, res, next) => {
+    const pathId = /^\/conversations\/([^/]+)/.exec(req.path)?.[1];
+    const id = pathId || (req.path === "/chat" ? req.body?.conversationId : null);
+    if (id) {
+      const conversation = await storage.getConversation(id);
+      if (!conversation || conversation.userId !== req.sessionID) {
+        return res.status(404).json({ error: "Conversation not found in this browser session." });
+      }
+    }
+    next();
+  });
   // Voice profile endpoints
   app.post("/api/voice/profiles", async (req, res) => {
     try {
@@ -300,6 +315,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Voice cloning endpoint
+  const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB limit
+  
+  app.post("/api/elevenlabs/clone-voice", upload.array('audioFiles', 10), async (req, res) => {
+    try {
+      if (!process.env.ELEVENLABS_API_KEY) {
+        return res.status(503).json({ 
+          error: "ElevenLabs is not configured. Please add ELEVENLABS_API_KEY to use custom voices." 
+        });
+      }
+
+      const { name, description } = req.body;
+      const files = req.files as Express.Multer.File[];
+
+      if (!name) {
+        return res.status(400).json({ error: "Voice name is required" });
+      }
+
+      if (!files || files.length === 0) {
+        return res.status(400).json({ error: "At least one audio file is required" });
+      }
+
+      if (files.length > 10) {
+        return res.status(400).json({ error: "Maximum 10 audio files allowed" });
+      }
+
+      // Convert files to buffers
+      const audioBuffers = files.map(file => file.buffer);
+
+      const result = await elevenLabsService.createVoiceClone({
+        name,
+        description,
+        files: audioBuffers,
+        labels: { type: 'custom_clone' }
+      });
+
+      res.json({
+        success: true,
+        voiceId: result.voiceId,
+        name: result.name,
+        message: `Voice "${result.name}" cloned successfully! You can now use it for text-to-speech.`
+      });
+    } catch (error) {
+      console.error("Error cloning voice:", error);
+      const errorMessage = error instanceof Error ? error.message : "Failed to clone voice";
+      res.status(500).json({ error: errorMessage });
+    }
+  });
+
+  // Delete custom voice endpoint
+  app.delete("/api/elevenlabs/voices/:voiceId", async (req, res) => {
+    try {
+      if (!process.env.ELEVENLABS_API_KEY) {
+        return res.status(503).json({ 
+          error: "ElevenLabs is not configured." 
+        });
+      }
+
+      const { voiceId } = req.params;
+      await elevenLabsService.deleteVoice(voiceId);
+      
+      res.json({ success: true, message: "Voice deleted successfully" });
+    } catch (error) {
+      console.error("Error deleting voice:", error);
+      res.status(500).json({ error: "Failed to delete voice" });
+    }
+  });
+
   // Chat endpoint
   app.post("/api/chat", async (req, res) => {
     try {
@@ -307,6 +390,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!message || typeof message !== "string") {
         return res.status(400).json({ error: "Message is required" });
+      }
+
+      const appointmentReply = await handleAppointmentChat(message, req.sessionID, req.body.timeZone);
+      if (appointmentReply !== null) {
+        if (conversationId) {
+          await storage.createMessage({ conversationId, role: "user", content: message, metadata: null });
+          await storage.createMessage({ conversationId, role: "assistant", content: appointmentReply, metadata: { appointment: true } });
+        }
+        return res.json({ response: appointmentReply, searchUsed: false, translationUsed: false, timestamp: new Date().toISOString() });
       }
 
       // Check for reminder or planning requests first
@@ -665,6 +757,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/conversations", async (req, res) => {
+    try {
+      const conversations = await storage.getUserConversations(req.sessionID);
+      const result = await Promise.all(conversations.map(async conversation => {
+        const messages = await storage.getConversationMessages(conversation.id);
+        return {
+          ...conversation,
+          messageCount: messages.length,
+          lastMessage: messages.at(-1)?.content || "",
+          lastActivityAt: messages.at(-1)?.createdAt || conversation.updatedAt,
+        };
+      }));
+      res.json(result.sort((a, b) => new Date(b.lastActivityAt!).getTime() - new Date(a.lastActivityAt!).getTime()));
+    } catch {
+      res.status(500).json({ error: "Could not load your conversations." });
+    }
+  });
+
   // Create conversation
   app.post("/api/conversations", async (req, res) => {
     try {
@@ -672,7 +782,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const conversation = await storage.createConversation({
         title: title || "New Conversation"
-      });
+      }, req.sessionID);
       
       res.json(conversation);
     } catch (error) {

@@ -56,6 +56,14 @@ The application now includes comprehensive mobile device support for text-to-spe
 - **User Interaction Requirements**: Audio systems initialize automatically when users interact with the chat interface
 
 ### Data Storage Solutions
+#### Personal dashboard and appointments
+- `/dashboard` shows only the current browser session's conversations, searchable history, transcripts, and actual activity counts.
+- `/appointments` provides a monthly calendar and create/edit/cancel appointment forms.
+- Appointment records persist in the existing PostgreSQL database. Startup creates only the additive `bertha_appointments` table and its index; do not run a broad schema push just to add appointments.
+- Browser ownership uses an HTTP-only session cookie with a PostgreSQL-backed session store (`bertha_sessions`). Appointment access survives server restarts in the same browser. There is no account sign-in or cross-device synchronization; clearing the session cookie loses access to that browser's records.
+- Conversation/message storage remains in memory and resets when the server restarts. Do not promise durable conversation history.
+- Appointment reminders are polled while chat is open, displayed as assistant messages (and spoken when voice is enabled), then acknowledged to avoid repeated delivery. No background push/email notifications are implied.
+
 Currently implements an in-memory storage system with well-defined interfaces for:
 - User management and authentication
 - Conversation and message persistence

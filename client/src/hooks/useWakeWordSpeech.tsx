@@ -221,6 +221,11 @@ export function useWakeWordSpeech() {
     };
 
     recognition.onerror = (event: any) => {
+      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+        recognition._stopped = true;
+        setIsWakeWordListening(false);
+        return;
+      }
       // Ignore common errors and restart
       if (event.error !== 'aborted' && event.error !== 'no-speech' && event.error !== 'audio-capture') {
         console.log('Wake word recognition error:', event.error);
@@ -230,7 +235,7 @@ export function useWakeWordSpeech() {
       if (!recognition._stopped) {
         setTimeout(() => {
           try {
-            if (recognitionRef.current) {
+            if (recognitionRef.current === recognition && !recognition._stopped) {
               console.log(`🔄 Restarting speech recognition (Conversation mode: ${conversationModeRef.current})`);
               recognition.start();
             }
@@ -252,7 +257,7 @@ export function useWakeWordSpeech() {
       if (!recognition._stopped) {
         setTimeout(() => {
           try {
-            if (recognitionRef.current) {
+            if (recognitionRef.current === recognition && !recognition._stopped) {
               console.log(`🔄 Auto-restarting speech recognition (Conversation mode: ${conversationModeRef.current})`);
               recognition.start();
             }

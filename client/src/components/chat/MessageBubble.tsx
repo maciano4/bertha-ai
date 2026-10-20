@@ -42,7 +42,7 @@ export default function MessageBubble({ message, showAvatar }: MessageBubbleProp
 
   return (
     <div className={cn(
-      "message-bubble p-4 rounded-lg shadow-sm",
+      "message-bubble min-w-0 break-words p-4 rounded-lg shadow-sm",
       isUser ? "user-message ml-auto" : "ai-message"
     )}>
       {!isUser && showAvatar ? (
@@ -53,7 +53,7 @@ export default function MessageBubble({ message, showAvatar }: MessageBubbleProp
             className="w-8 h-8 rounded-full flex-shrink-0 object-cover"
             data-testid="img-avatar"
           />
-          <div className="flex-1">
+          <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <p className="font-medium text-sm text-muted-foreground">
                 {message.metadata?.recognizedUser ? `Bertha (talking to ${message.metadata.recognizedUser})` : "Bertha AI"}

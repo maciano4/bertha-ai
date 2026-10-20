@@ -1,0 +1,2 @@
+- [Personal assistant scope](personal-assistant-scope.md) — Bertha is a personal assistant; the dashboard is for the owner's own chats, not an all-users admin view.
+- [Scheduling independence](scheduling-independence.md) — keep routine scheduling independent of paid chat-model availability; ask rather than guess ambiguous dates.

@@ -28,16 +28,79 @@ export interface TextToSpeechOptions {
 export class ElevenLabsService {
   /**
    * Create an instant voice clone from audio samples
-   * Note: Voice cloning must be done through the ElevenLabs website currently.
-   * This method is a placeholder for future API support.
+   * Requires at least 1 audio file (recommended 3-10 clips of 30s-5min each)
+   * NOTE: Voice cloning requires a paid ElevenLabs subscription (Creator tier or higher)
    */
   async createVoiceClone(options: VoiceCloneOptions): Promise<{ voiceId: string; name: string }> {
     try {
-      console.log(`Voice cloning through API is not yet supported`);
-      throw new Error("Voice cloning must be done through the ElevenLabs website. Please visit https://elevenlabs.io to create custom voices.");
+      console.log(`Creating voice clone: "${options.name}" with ${options.files.length} audio sample(s)`);
+      
+      if (options.files.length === 0) {
+        throw new Error("At least one audio file is required for voice cloning");
+      }
+      
+      const FormData = (await import('form-data')).default;
+      const form = new FormData();
+      
+      // Add voice metadata
+      form.append('name', options.name);
+      if (options.description) {
+        form.append('description', options.description);
+      }
+      
+      // Add labels as JSON string
+      if (options.labels && Object.keys(options.labels).length > 0) {
+        form.append('labels', JSON.stringify(options.labels));
+      }
+      
+      // Add audio files
+      options.files.forEach((buffer, index) => {
+        form.append('files', buffer, {
+          filename: `sample_${index}.mp3`,
+          contentType: 'audio/mpeg',
+        });
+      });
+      
+      // Make direct API call using fetch
+      const response = await fetch('https://api.elevenlabs.io/v1/voices/add', {
+        method: 'POST',
+        headers: {
+          'xi-api-key': process.env.ELEVENLABS_API_KEY || '',
+          ...form.getHeaders(),
+        },
+        body: form as any,
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Voice cloning API error:', errorText);
+        
+        if (response.status === 401 || response.status === 403) {
+          throw new Error("Voice cloning requires a paid ElevenLabs subscription (Creator tier or higher). Please upgrade your plan at elevenlabs.io");
+        }
+        
+        throw new Error(`API request failed: ${response.status} ${response.statusText}`);
+      }
+      
+      const result: any = await response.json();
+      console.log(`✅ Voice clone created successfully: ${result.voice_id}`);
+      
+      return {
+        voiceId: result.voice_id,
+        name: options.name
+      };
     } catch (error) {
       console.error("Error creating voice clone:", error);
-      throw new Error(`Failed to create voice clone: ${error instanceof Error ? error.message : "Unknown error"}`);
+      
+      // Provide helpful error messages
+      if (error instanceof Error) {
+        if (error.message.includes('permission') || error.message.includes('tier') || error.message.includes('subscription')) {
+          throw error; // Re-throw subscription errors as-is
+        }
+        throw new Error(`Failed to create voice clone: ${error.message}`);
+      }
+      
+      throw new Error("Failed to create voice clone: Unknown error");
     }
   }
 

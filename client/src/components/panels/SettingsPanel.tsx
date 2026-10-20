@@ -24,7 +24,7 @@ export default function SettingsPanel({ onBackgroundChange }: SettingsPanelProps
   const { toast } = useToast();
   const [settings, setSettings] = useState<SettingsData>({
     language: "en",
-    speechEnabled: false,
+    speechEnabled: true,
     searchEnabled: true,
     voiceSpeed: "1"
   });
@@ -57,11 +57,24 @@ export default function SettingsPanel({ onBackgroundChange }: SettingsPanelProps
     }
   }, []);
 
+  useEffect(() => {
+    const handleSettingsChange = (event: Event) => {
+      const updatedSettings = (event as CustomEvent<Partial<SettingsData>>).detail;
+      if (updatedSettings) {
+        setSettings(currentSettings => ({ ...currentSettings, ...updatedSettings }));
+      }
+    };
+
+    window.addEventListener("bertha-settings-changed", handleSettingsChange);
+    return () => window.removeEventListener("bertha-settings-changed", handleSettingsChange);
+  }, []);
+
   // Save settings to localStorage
   const updateSettings = (newSettings: Partial<SettingsData>) => {
     const updated = { ...settings, ...newSettings };
     setSettings(updated);
     localStorage.setItem("bertha-settings", JSON.stringify(updated));
+    window.dispatchEvent(new CustomEvent("bertha-settings-changed", { detail: updated }));
   };
 
   const languages = [

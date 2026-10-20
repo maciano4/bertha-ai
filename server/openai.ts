@@ -3,7 +3,7 @@ import { performNLPAnalysis, type NLPAnalysis } from "./nlp";
 
 // Using GPT-3.5-turbo for faster responses. GPT-4o only needed for images/complex tasks
 const openai = new OpenAI({ 
-  apiKey: process.env.OPENAI_API_KEY || process.env.OPENAI_KEY || "default_key"
+  apiKey: process.env.OPENAI_API_KEY || process.env.OpenAI_API_KEY || process.env.OPENAI_KEY || "default_key"
 });
 
 export interface ChatResponse {

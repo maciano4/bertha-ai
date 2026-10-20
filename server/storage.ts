@@ -6,7 +6,7 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   
-  createConversation(conversation: InsertConversation): Promise<Conversation>;
+  createConversation(conversation: InsertConversation, ownerId?: string): Promise<Conversation>;
   getConversation(id: string): Promise<Conversation | undefined>;
   getUserConversations(userId: string): Promise<Conversation[]>;
   deleteConversation(id: string): Promise<void>;
@@ -50,7 +50,7 @@ export class MemStorage implements IStorage {
     return user;
   }
 
-  async createConversation(conversation: InsertConversation): Promise<Conversation> {
+  async createConversation(conversation: InsertConversation, ownerId?: string): Promise<Conversation> {
     const id = randomUUID();
     const now = new Date();
     const conv: Conversation = { 
@@ -58,7 +58,7 @@ export class MemStorage implements IStorage {
       id, 
       createdAt: now, 
       updatedAt: now,
-      userId: null 
+      userId: ownerId || null
     };
     this.conversations.set(id, conv);
     return conv;
@@ -90,6 +90,8 @@ export class MemStorage implements IStorage {
       conversationId: message.conversationId || null
     };
     this.messages.set(id, msg);
+    const conversation = msg.conversationId && this.conversations.get(msg.conversationId);
+    if (conversation) conversation.updatedAt = msg.createdAt;
     return msg;
   }
 

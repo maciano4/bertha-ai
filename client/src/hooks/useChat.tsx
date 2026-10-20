@@ -1,5 +1,5 @@
-import { useState, useCallback, useRef } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -24,144 +24,94 @@ export interface ChatSettings {
 
 export function useChat(conversationId: string | null) {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [latestReply, setLatestReply] = useState<Message | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+  const cache = useQueryClient();
+  const activeConversationRef = useRef(conversationId);
+  const busyRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Load conversation messages
-  useQuery({
+  useEffect(() => { activeConversationRef.current = conversationId; }, [conversationId]);
+
+  const history = useQuery({
     queryKey: ["/api/conversations", conversationId, "messages"],
     enabled: !!conversationId,
     queryFn: async () => {
-      if (!conversationId) return [];
       const response = await apiRequest("GET", `/api/conversations/${conversationId}/messages`);
-      const data = await response.json();
-      setMessages(data.map((msg: any) => ({
-        ...msg,
-        timestamp: new Date(msg.createdAt)
-      })));
-      return data;
-    }
+      return response.json();
+    },
   });
+  useEffect(() => {
+    if (history.data && !busyRef.current) {
+      setMessages(history.data.map((message: any) => ({
+        ...message, timestamp: new Date(message.createdAt),
+      })));
+    }
+  }, [history.data]);
 
-  // Send message mutation
+  const addAssistantMessage = useCallback((content: string, id: string = crypto.randomUUID()) => {
+    const reply: Message = { id, role: "assistant", content, timestamp: new Date() };
+    setMessages(current => current.some(item => item.id === id) ? current : [...current, reply]);
+    setLatestReply(reply);
+  }, []);
+
   const sendMessageMutation = useMutation({
-    mutationFn: async ({ message, settings }: { message: string; settings: ChatSettings }) => {
+    mutationFn: async ({ message, settings, targetId }: { message: string; settings: ChatSettings; targetId: string }) => {
       const response = await apiRequest("POST", "/api/chat", {
         message,
-        conversationId,
+        conversationId: targetId,
         language: settings.language,
-        searchEnabled: settings.searchEnabled
+        searchEnabled: settings.searchEnabled,
+        timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
       return response.json();
     },
-    onSuccess: (data) => {
-      console.log('✅ CHAT API SUCCESS:', {
-        response: data.response.slice(0, 50),
-        searchUsed: data.searchUsed,
-        timestamp: data.timestamp
-      });
-      
-      // Add AI response to messages
-      const aiMessage: Message = {
-        id: Date.now().toString(),
-        role: "assistant",
-        content: data.response,
-        timestamp: new Date(data.timestamp),
-        metadata: {
-          searchUsed: data.searchUsed,
-          translationUsed: data.translationUsed,
-          recognizedUser: data.recognizedUser
-        }
-      };
-      
-      console.log('🔄 UPDATING CHAT STATE:', {
-        settingLoading: false,
-        addingMessage: aiMessage.content.slice(0, 50)
-      });
-      
-      // Update isLoading FIRST, then add message to ensure proper timing for speech synthesis
-      setIsLoading(false);
-      setMessages(prev => {
-        const newMessages = [...prev, aiMessage];
-        console.log('📝 MESSAGES ARRAY UPDATED:', {
-          length: newMessages.length,
-          lastMessage: newMessages[newMessages.length - 1]
-        });
-        return newMessages;
-      });
-      
-      if (data.searchUsed) {
-        addSystemMessage("Web search completed");
-      }
-      if (data.translationUsed) {
-        addSystemMessage("Response translated");
-      }
-      if (data.recognizedUser) {
-        addSystemMessage(`👋 Recognized voice: ${data.recognizedUser}`);
-      }
+    onSuccess: data => {
+      addAssistantMessage(data.response);
+      cache.invalidateQueries({ queryKey: ["/api/conversations"] });
+      cache.invalidateQueries({ queryKey: ["appointments"] });
+      cache.invalidateQueries({ queryKey: ["/api/appointments"] });
     },
-    onError: (error) => {
-      toast({
-        title: "Error",
-        description: error instanceof Error ? error.message : "Failed to send message",
-        variant: "destructive"
-      });
-    },
-    onSettled: () => {
-      // isLoading is now set in onSuccess for proper timing
-      // Only set to false here if there was an error
-      if (sendMessageMutation.isError) {
-        setIsLoading(false);
-      }
-    }
   });
 
-  const sendMessage = useCallback(async (content: string, settings: ChatSettings) => {
-    if (!content.trim()) return;
-
+  const sendMessage = useCallback(async (content: string, settings: ChatSettings): Promise<string | null> => {
+    if (!content.trim() || busyRef.current) return null;
+    busyRef.current = true;
     setIsLoading(true);
-
-    // Add user message immediately
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: "user",
-      content: content.trim(),
-      timestamp: new Date()
-    };
-
-    setMessages(prev => [...prev, userMessage]);
-
-    // Send to API
-    sendMessageMutation.mutate({ message: content.trim(), settings });
-  }, [sendMessageMutation]);
+    setMessages(previous => [...previous, {
+      id: crypto.randomUUID(), role: "user", content: content.trim(), timestamp: new Date(),
+    }]);
+    try {
+      let targetId = activeConversationRef.current;
+      if (!targetId) {
+        const response = await apiRequest("POST", "/api/conversations", { title: content.trim().slice(0, 80) });
+        const conversation = await response.json();
+        targetId = conversation.id as string;
+        activeConversationRef.current = targetId;
+      }
+      await sendMessageMutation.mutateAsync({ message: content.trim(), settings, targetId });
+      return targetId;
+    } catch (error) {
+      toast({ title: "Message not sent", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+      return activeConversationRef.current;
+    } finally {
+      busyRef.current = false;
+      setIsLoading(false);
+    }
+  }, [sendMessageMutation, toast]);
 
   const addSystemMessage = useCallback((content: string) => {
-    const systemMessage: Message = {
-      id: Date.now().toString(),
-      role: "system",
-      content,
-      timestamp: new Date()
-    };
-    setMessages(prev => [...prev, systemMessage]);
+    setMessages(previous => [...previous, { id: crypto.randomUUID(), role: "system", content, timestamp: new Date() }]);
   }, []);
-
-  const clearMessages = useCallback(() => {
-    setMessages([]);
-  }, []);
-
-  // Auto-scroll to bottom
+  const clearMessages = useCallback(() => { setMessages([]); setLatestReply(null); }, []);
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
   return {
-    messages,
-    isLoading,
-    sendMessage,
-    addSystemMessage,
-    clearMessages,
-    scrollToBottom,
-    messagesEndRef
+    messages, latestReply, isLoading, sendMessage, addAssistantMessage,
+    addSystemMessage, clearMessages, scrollToBottom, messagesEndRef,
+    historyError: history.error,
   };
 }

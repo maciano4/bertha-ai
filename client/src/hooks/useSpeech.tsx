@@ -14,6 +14,9 @@ export function useSpeech() {
   const pauseWakeWordRef = useRef<(() => void) | null>(null);
   const resumeWakeWordRef = useRef<(() => void) | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const currentSpeechUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const speechRequestIdRef = useRef(0);
   const { toast } = useToast();
 
   // Initialize Audio Context for mobile devices
@@ -44,6 +47,7 @@ export function useSpeech() {
   const playAudioWithMobileSupport = useCallback(async (audioUrl: string): Promise<void> => {
     return new Promise((resolve, reject) => {
       const audio = new Audio(audioUrl);
+      currentAudioRef.current = audio; // Track current audio
       
       // Mobile-specific configurations
       if (isMobileDevice()) {
@@ -58,6 +62,7 @@ export function useSpeech() {
       audio.onended = () => {
         setIsSpeaking(false);
         URL.revokeObjectURL(audioUrl);
+        currentAudioRef.current = null;
         console.log('🔇 Audio completed');
         
         // Add grace period
@@ -75,6 +80,7 @@ export function useSpeech() {
       audio.onerror = (error) => {
         setIsSpeaking(false);
         URL.revokeObjectURL(audioUrl);
+        currentAudioRef.current = null;
         console.error('Audio playback error:', error);
         reject(error);
       };
@@ -88,6 +94,7 @@ export function useSpeech() {
           if (error.name === 'NotAllowedError' || error.name === 'NotSupportedError') {
             console.log('📱 Mobile autoplay blocked - will retry on next user interaction');
           }
+          currentAudioRef.current = null;
           reject(error);
         });
       }
@@ -100,95 +107,36 @@ export function useSpeech() {
     resumeWakeWordRef.current = resumeCallback;
   }, []);
 
-  // Text-to-Speech with ElevenLabs or fallback to browser TTS
-  const speak = useCallback(async (text: string, rate: number = 0.8) => {
-    // Check if ElevenLabs voice is selected
-    const elevenLabsVoiceId = localStorage.getItem("bertha_voice_id");
-    
-    if (elevenLabsVoiceId) {
-      // Use ElevenLabs TTS
-      try {
-        setIsSpeaking(true);
-        console.log(`🔊 Speaking with ElevenLabs voice: ${elevenLabsVoiceId}`);
-        
-        // Load voice parameters from localStorage
-        const savedParams = localStorage.getItem("bertha_voice_params");
-        const voiceParams = savedParams ? JSON.parse(savedParams) : { stability: 0.5, similarityBoost: 0.75 };
-        
-        const response = await fetch("/api/elevenlabs/tts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text,
-            voiceId: elevenLabsVoiceId,
-            stability: voiceParams.stability,
-            similarityBoost: voiceParams.similarityBoost,
-          }),
-        });
+  // Chat replies use the browser's built-in speech synthesis so the feature
+  // works without an API key and remains available on desktop and mobile.
+  const speak = useCallback((text: string, rate: number = 1.0) => {
+    if (!text.trim()) return;
 
-        if (!response.ok) {
-          throw new Error("Failed to generate speech");
-        }
-
-        const audioBlob = await response.blob();
-        const audioUrl = URL.createObjectURL(audioBlob);
-        
-        // Initialize audio context for mobile if needed
-        if (isMobileDevice()) {
-          initializeAudioContext();
-        }
-        
-        // Use mobile-friendly audio playback
-        try {
-          await playAudioWithMobileSupport(audioUrl);
-        } catch (playError) {
-          console.error('Mobile audio playback failed:', playError);
-          // Fallback to browser TTS
-          console.log('Falling back to browser TTS');
-          speakWithBrowserTTS(text, rate);
-        }
-        return;
-      } catch (error) {
-        console.error('Error using ElevenLabs TTS:', error);
-        setIsSpeaking(false);
-        
-        // Fallback to browser TTS
-        console.log('Falling back to browser TTS');
-        speakWithBrowserTTS(text, rate);
-        return;
-      }
-    }
-    
-    // Use browser TTS if no ElevenLabs voice selected
+    // A new reply always replaces anything Bertha is currently saying.
+    stopSpeaking();
     speakWithBrowserTTS(text, rate);
   }, [toast]);
 
   // Browser TTS fallback function
-  const speakWithBrowserTTS = useCallback((text: string, rate: number = 0.8) => {
+  const speakWithBrowserTTS = useCallback((text: string, rate: number = 1.0) => {
     console.log('🔊 Browser TTS requested. speechSynthesis available:', 'speechSynthesis' in window);
-    console.log('🔊 speechSynthesisInitialized:', !!(window as any).speechSynthesisInitialized);
     
     if ('speechSynthesis' in window) {
-      // Check if speech synthesis has been initialized with user interaction
-      if (!(window as any).speechSynthesisInitialized) {
-        console.log('⚠️ Speech synthesis not initialized - requiring user interaction first');
-        toast({
-          title: "Audio Not Ready",
-          description: "Please click or tap anywhere on the page to enable audio playback",
-          variant: "default"
-        });
-        return;
-      }
-      
-      // Cancel any ongoing speech
+      const requestId = ++speechRequestIdRef.current;
       window.speechSynthesis.cancel();
       
+      const startSpeaking = () => {
+        // An iOS delay can outlive a newer reply; do not let stale speech start.
+        if (requestId !== speechRequestIdRef.current) return;
+        speakBrowserTTSInternal(text, rate, requestId);
+      };
+
       // iOS Safari workaround: small delay before speaking
       if (isIOS()) {
         console.log('🍎 Using iOS Safari delay before speaking');
-        setTimeout(() => speakBrowserTTSInternal(text, rate), 100);
+        setTimeout(startSpeaking, 100);
       } else {
-        speakBrowserTTSInternal(text, rate);
+        startSpeaking();
       }
     } else {
       console.error('❌ speechSynthesis API not available in this browser');
@@ -208,56 +156,60 @@ export function useSpeech() {
   }, [toast]);
 
   // Internal browser TTS function
-  const speakBrowserTTSInternal = useCallback((text: string, rate: number = 0.8) => {
+  const speakBrowserTTSInternal = useCallback((
+    text: string,
+    rate: number = 1.0,
+    requestId?: number
+  ) => {
     if (!('speechSynthesis' in window)) return;
       
       // Function to actually speak with proper voice selection
       const doSpeak = (voiceList: SpeechSynthesisVoice[]) => {
+        if (requestId !== undefined && requestId !== speechRequestIdRef.current) return;
         console.log('Available voices:', voiceList.map(v => `${v.name} (${v.lang})`));
         
-        // Find the best female voice for a Cameroon grandmother
-        let selectedVoice = 
-          // First: British/UK female voices 
-          voiceList.find(voice => 
-            voice.lang.includes('en-GB') && 
-            voice.name.toLowerCase().includes('female')
+        // Prefer clear, friendly female voices, with common system names first.
+        const preferredFemaleNames = [
+          "google us english female",
+          "samantha",
+          "microsoft zira",
+          "zira",
+        ];
+        const femaleNamePattern = /\b(linda|susan|anna|karen|sarah|emma|sophie|marie|claire|victoria|female)\b/i;
+        const maleNamePattern = /\b(male|man|david|richard|mark|alex|daniel)\b/i;
+        const selectedVoice =
+          voiceList.find(voice => {
+            const name = voice.name.toLowerCase();
+            return preferredFemaleNames.some(preferred =>
+              name === preferred || name.startsWith(`${preferred} `)
+            );
+          }) ||
+          voiceList.find(voice => femaleNamePattern.test(voice.name)) ||
+          voiceList.find(voice =>
+            voice.lang.toLowerCase().startsWith('en-us') &&
+            !maleNamePattern.test(voice.name)
           ) ||
-          // Second: Any female voice by name pattern
-          voiceList.find(voice => 
-            voice.name.toLowerCase().includes('female') &&
-            !voice.name.toLowerCase().includes('male')
+          voiceList.find(voice =>
+            voice.lang.toLowerCase().startsWith('en') &&
+            !maleNamePattern.test(voice.name)
           ) ||
-          // Third: Voices with common female names
-          voiceList.find(voice => 
-            /\b(linda|zira|susan|anna|karen|sarah|emma|sophie|marie|claire|samantha|victoria)\b/i.test(voice.name)
-          ) ||
-          // Fourth: French voices for bilingual background
-          voiceList.find(voice => 
-            voice.lang.startsWith('fr')
-          ) ||
-          // Last: Avoid male voices explicitly
-          voiceList.find(voice => 
-            !voice.name.toLowerCase().includes('male') && 
-            !voice.name.toLowerCase().includes('man') &&
-            !voice.name.toLowerCase().includes('david') &&
-            !voice.name.toLowerCase().includes('richard') &&
-            !voice.name.toLowerCase().includes('mark') &&
-            voice.lang.startsWith('en')
-          );
+          voiceList.find(voice => !maleNamePattern.test(voice.name));
         
         console.log('Selected voice:', selectedVoice ? `${selectedVoice.name} (${selectedVoice.lang})` : 'default');
         
         const utterance = new SpeechSynthesisUtterance(text);
+        currentSpeechUtteranceRef.current = utterance; // Track current utterance for interruption
         
         // Set voice if found
         if (selectedVoice) {
           utterance.voice = selectedVoice;
         }
         
-        // Grandmother voice characteristics
-        utterance.rate = 0.75; // Slow, deliberate speech
-        utterance.pitch = selectedVoice?.name.toLowerCase().includes('female') ? 1.0 : 1.1; // Female-like pitch
-        utterance.volume = 0.95;
+        // Natural conversational delivery: close to the browser default, with
+        // a small pitch lift to avoid sounding flat on generic voices.
+        utterance.rate = Math.min(1.05, Math.max(0.95, rate));
+        utterance.pitch = 1.08;
+        utterance.volume = 1;
         
         utterance.onstart = () => {
           setIsSpeaking(true);
@@ -266,7 +218,10 @@ export function useSpeech() {
         };
         
         utterance.onend = () => {
-          setIsSpeaking(false);
+          if (currentSpeechUtteranceRef.current === utterance) {
+            setIsSpeaking(false);
+            currentSpeechUtteranceRef.current = null;
+          }
           console.log('🔇 Speech synthesis completed naturally');
           
           // Add grace period to ignore speech recognition for 2 seconds after speech ends
@@ -282,8 +237,13 @@ export function useSpeech() {
         };
         
         utterance.onerror = (event) => {
-          setIsSpeaking(false);
-          console.error('Speech synthesis error:', event.error);
+          if (currentSpeechUtteranceRef.current === utterance) {
+            setIsSpeaking(false);
+            currentSpeechUtteranceRef.current = null;
+          }
+          if (event.error !== 'canceled' && event.error !== 'interrupted') {
+            console.error('Speech synthesis error:', event.error);
+          }
           // No need to resume since we never paused
         };
         
@@ -291,25 +251,31 @@ export function useSpeech() {
         window.speechSynthesis.speak(utterance);
       };
       
-      // Get voices and handle loading
+      // Voices can load asynchronously, especially on Safari and mobile.
       const voices = window.speechSynthesis.getVoices();
       
       if (voices.length > 0) {
         doSpeak(voices);
       } else {
-        // Wait for voices to load
-        window.speechSynthesis.onvoiceschanged = () => {
+        let didStart = false;
+        const handleVoicesChanged = () => {
           const loadedVoices = window.speechSynthesis.getVoices();
-          if (loadedVoices.length > 0) {
+          if (!didStart && loadedVoices.length > 0) {
+            didStart = true;
             console.log('Voices loaded:', loadedVoices.length);
             doSpeak(loadedVoices);
           }
         };
+        window.speechSynthesis.onvoiceschanged = handleVoicesChanged;
         
         // Fallback after delay
         setTimeout(() => {
           const fallbackVoices = window.speechSynthesis.getVoices();
-          if (fallbackVoices.length > 0) {
+          if (!didStart) {
+            didStart = true;
+            // Some mobile browsers do not populate getVoices() until after
+            // their first utterance. Speaking without an assigned voice lets
+            // the browser choose its own default instead of dropping a reply.
             doSpeak(fallbackVoices);
           }
         }, 300);
@@ -318,36 +284,40 @@ export function useSpeech() {
 
   // Initialize speech synthesis with user interaction
   const initializeSpeechSynthesis = useCallback(() => {
-    if ('speechSynthesis' in window && !(window as any).speechSynthesisInitialized) {
-      console.log('🎤 Initializing speech synthesis with user interaction...');
-      
-      // Create a silent utterance to initialize the speech synthesis
-      const utterance = new SpeechSynthesisUtterance('');
-      utterance.volume = 0;
-      utterance.rate = 0.1;
-      utterance.pitch = 0.1;
-      
-      utterance.onstart = () => {
-        (window as any).speechSynthesisInitialized = true;
-        console.log('✅ Speech synthesis initialized successfully!');
-        window.speechSynthesis.cancel(); // Cancel the silent utterance
-      };
-      
-      utterance.onerror = (event) => {
-        console.log('⚠️ Speech synthesis initialization error:', event.error);
-        // Mark as initialized anyway to avoid repeated attempts
-        (window as any).speechSynthesisInitialized = true;
-      };
-      
-      window.speechSynthesis.speak(utterance);
+    if ('speechSynthesis' in window) {
+      // Calling resume/getVoices from a user gesture helps Safari and mobile
+      // browsers unlock their speech engine without adding audible output.
+      window.speechSynthesis.resume();
+      window.speechSynthesis.getVoices();
+      (window as any).speechSynthesisInitialized = true;
     }
   }, []);
 
+  // Stop any ongoing speech immediately (enhanced with interruption support)
   const stopSpeaking = useCallback(() => {
+    console.log('🛑 Stopping all speech output');
+    speechRequestIdRef.current += 1;
+    
+    // Stop ElevenLabs audio if playing
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current.currentTime = 0;
+      currentAudioRef.current = null;
+    }
+    
+    // Stop browser TTS if speaking
+    if (currentSpeechUtteranceRef.current) {
+      window.speechSynthesis.cancel();
+      currentSpeechUtteranceRef.current = null;
+    }
+    
+    // Also cancel any ongoing speech synthesis
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-      setIsSpeaking(false);
     }
+    
+    setIsSpeaking(false);
+    console.log('✅ All speech stopped');
   }, []);
 
   // Speech-to-Text with auto-send capability
@@ -536,6 +506,12 @@ export function useSpeech() {
     };
 
     wakeWordRecognition.onresult = (event: any) => {
+      // Check if agent is currently speaking - if so, interrupt immediately
+      if (isSpeaking) {
+        console.log('🛑 User speaking detected while agent is talking - interrupting agent');
+        stopSpeaking();
+      }
+      
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         if (result.isFinal) {

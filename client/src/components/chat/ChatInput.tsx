@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Mic, Send, Image } from "lucide-react";
+import { Mic, Send, Image, Volume2, VolumeX } from "lucide-react";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useCamera } from "@/hooks/useCamera";
 import { useToast } from "@/hooks/use-toast";
@@ -12,9 +12,16 @@ interface ChatInputProps {
   isLoading: boolean;
   language: string;
   speechEnabled?: boolean;
+  onToggleSpeech?: () => void;
 }
 
-export default function ChatInput({ onSendMessage, isLoading, language, speechEnabled = false }: ChatInputProps) {
+export default function ChatInput({
+  onSendMessage,
+  isLoading,
+  language,
+  speechEnabled = true,
+  onToggleSpeech,
+}: ChatInputProps) {
   const [message, setMessage] = useState("");
   const [charCount, setCharCount] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -160,7 +167,7 @@ export default function ChatInput({ onSendMessage, isLoading, language, speechEn
   };
 
   return (
-    <div className="flex items-end gap-3 max-w-4xl mx-auto">
+    <div className="flex min-w-0 flex-wrap items-end gap-2 max-w-4xl mx-auto sm:flex-nowrap sm:gap-3">
       {/* Voice Input Button */}
       <Button
         variant={isListening ? "default" : "secondary"}
@@ -187,8 +194,26 @@ export default function ChatInput({ onSendMessage, isLoading, language, speechEn
         <Image className="h-5 w-5" />
       </Button>
 
+      {/* Bertha voice output toggle */}
+      {onToggleSpeech && (
+        <Button
+          variant={speechEnabled ? "secondary" : "outline"}
+          size="icon"
+          onClick={onToggleSpeech}
+          aria-label={speechEnabled ? "Mute Bertha's voice" : "Turn on Bertha's voice"}
+          title={speechEnabled ? "Mute Bertha's voice" : "Turn on Bertha's voice"}
+          data-testid="button-toggle-speech"
+        >
+          {speechEnabled ? (
+            <Volume2 className="h-5 w-5" />
+          ) : (
+            <VolumeX className="h-5 w-5" />
+          )}
+        </Button>
+      )}
+
       {/* Text Input */}
-      <div className="flex-1 relative">
+      <div className="relative order-first w-full min-w-0 sm:order-none sm:w-auto sm:flex-1">
         <Textarea
           ref={textareaRef}
           value={message}

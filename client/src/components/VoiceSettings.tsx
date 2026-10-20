@@ -1,14 +1,16 @@
 import { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Volume2, AlertCircle, CheckCircle2, Info, HelpCircle } from "lucide-react";
+import { Volume2, AlertCircle, CheckCircle2, Info, HelpCircle, Upload, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Input } from "@/components/ui/input";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { queryClient } from "@/lib/queryClient";
 
 interface ElevenLabsVoice {
   voiceId: string;
@@ -47,6 +49,10 @@ export function VoiceSettings({
   const [isTestingVoice, setIsTestingVoice] = useState(false);
   const [showManualInput, setShowManualInput] = useState(false);
   const [manualVoiceId, setManualVoiceId] = useState("");
+  const [showVoiceCloning, setShowVoiceCloning] = useState(false);
+  const [voiceName, setVoiceName] = useState("");
+  const [voiceDescription, setVoiceDescription] = useState("");
+  const [audioFiles, setAudioFiles] = useState<File[]>([]);
 
   // Load saved voice parameters and ID on mount
   useEffect(() => {
@@ -103,6 +109,100 @@ export function VoiceSettings({
     };
     localStorage.setItem("bertha_voice_params", JSON.stringify(params));
   }, [stability, similarityBoost]);
+
+  // Voice cloning mutation
+  const cloneVoiceMutation = useMutation({
+    mutationFn: async ({ name, description, files }: { name: string; description: string; files: File[] }) => {
+      const formData = new FormData();
+      formData.append('name', name);
+      formData.append('description', description);
+      
+      files.forEach(file => {
+        formData.append('audioFiles', file);
+      });
+
+      const response = await fetch('/api/elevenlabs/clone-voice', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to clone voice');
+      }
+
+      return response.json();
+    },
+    onSuccess: (data) => {
+      toast({
+        title: "Voice Cloned Successfully! 🎉",
+        description: `Your custom voice "${data.name}" has been created. You can now use it for text-to-speech.`,
+      });
+      
+      // Refresh voice list
+      queryClient.invalidateQueries({ queryKey: ["/api/elevenlabs/voices"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/elevenlabs/usage"] });
+      
+      // Reset form
+      setVoiceName("");
+      setVoiceDescription("");
+      setAudioFiles([]);
+      setShowVoiceCloning(false);
+      
+      // Auto-select the new voice
+      handleVoiceChange(data.voiceId);
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Voice Cloning Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleFileSelection = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length + audioFiles.length > 10) {
+      toast({
+        title: "Too Many Files",
+        description: "Maximum 10 audio files allowed.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setAudioFiles(prev => [...prev, ...files]);
+  };
+
+  const removeAudioFile = (index: number) => {
+    setAudioFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleCloneVoice = () => {
+    if (!voiceName.trim()) {
+      toast({
+        title: "Name Required",
+        description: "Please enter a name for your custom voice.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (audioFiles.length === 0) {
+      toast({
+        title: "Audio Files Required",
+        description: "Please upload at least one audio file to clone your voice.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    cloneVoiceMutation.mutate({
+      name: voiceName,
+      description: voiceDescription,
+      files: audioFiles,
+    });
+  };
 
   const handleTestVoice = async () => {
     if (!localVoiceId) {
@@ -391,10 +491,136 @@ export function VoiceSettings({
         </Card>
       )}
 
+      {/* Voice Cloning Section */}
+      {usageStats?.canUseInstantVoiceCloning && (
+        <Card>
+          <Collapsible open={showVoiceCloning} onOpenChange={setShowVoiceCloning}>
+            <CardHeader>
+              <CollapsibleTrigger className="flex items-center justify-between w-full group">
+                <div className="flex items-center gap-2">
+                  <Upload className="h-5 w-5" />
+                  <CardTitle>Clone Your Voice</CardTitle>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  className="p-0 h-auto"
+                  data-testid="toggle-voice-cloning"
+                >
+                  {showVoiceCloning ? "Hide" : "Show"}
+                </Button>
+              </CollapsibleTrigger>
+              <CardDescription>
+                Create a personalized AI voice from audio samples
+              </CardDescription>
+            </CardHeader>
+            
+            <CollapsibleContent>
+              <CardContent className="space-y-4">
+                <Alert>
+                  <Info className="h-4 w-4" />
+                  <AlertDescription className="text-xs">
+                    Upload 1-10 audio clips (30s-5min each) of clear speech. Best quality comes from 3+ samples with varied intonation.
+                  </AlertDescription>
+                </Alert>
+
+                <div className="space-y-2">
+                  <Label htmlFor="voice-name">Voice Name*</Label>
+                  <Input
+                    id="voice-name"
+                    placeholder="e.g., My Custom Voice"
+                    value={voiceName}
+                    onChange={(e) => setVoiceName(e.target.value)}
+                    data-testid="input-voice-name"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="voice-description">Description (optional)</Label>
+                  <Input
+                    id="voice-description"
+                    placeholder="e.g., Warm and friendly voice for Bertha"
+                    value={voiceDescription}
+                    onChange={(e) => setVoiceDescription(e.target.value)}
+                    data-testid="input-voice-description"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Audio Files ({audioFiles.length}/10)</Label>
+                  <div className="border-2 border-dashed rounded-lg p-4 text-center">
+                    <input
+                      type="file"
+                      accept="audio/*"
+                      multiple
+                      onChange={handleFileSelection}
+                      className="hidden"
+                      id="audio-upload"
+                      data-testid="input-audio-files"
+                    />
+                    <label
+                      htmlFor="audio-upload"
+                      className="cursor-pointer flex flex-col items-center gap-2"
+                    >
+                      <Upload className="h-8 w-8 text-muted-foreground" />
+                      <span className="text-sm text-muted-foreground">
+                        Click to upload audio files
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        MP3, WAV, M4A (max 10MB each)
+                      </span>
+                    </label>
+                  </div>
+
+                  {audioFiles.length > 0 && (
+                    <div className="space-y-2 mt-3">
+                      {audioFiles.map((file, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between p-2 bg-secondary rounded-md"
+                          data-testid={`audio-file-${index}`}
+                        >
+                          <span className="text-sm truncate flex-1">{file.name}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeAudioFile(index)}
+                            data-testid={`button-remove-file-${index}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <Button
+                  onClick={handleCloneVoice}
+                  disabled={cloneVoiceMutation.isPending || !voiceName.trim() || audioFiles.length === 0}
+                  className="w-full"
+                  data-testid="button-clone-voice"
+                >
+                  {cloneVoiceMutation.isPending ? (
+                    <>Creating Voice...</>
+                  ) : (
+                    <>
+                      <Upload className="mr-2 h-4 w-4" />
+                      Clone Voice
+                    </>
+                  )}
+                </Button>
+              </CardContent>
+            </CollapsibleContent>
+          </Collapsible>
+        </Card>
+      )}
+
       <Alert>
         <Info className="h-4 w-4" />
         <AlertDescription className="text-sm">
-          <strong>Tip:</strong> You can create custom voices at{" "}
+          <strong>Tip:</strong> Voice cloning requires a paid ElevenLabs subscription (Creator tier or higher). 
+          Visit{" "}
           <a 
             href="https://elevenlabs.io" 
             target="_blank" 
@@ -403,7 +629,7 @@ export function VoiceSettings({
           >
             elevenlabs.io
           </a>
-          {" "}and they will appear here automatically.
+          {" "}to upgrade and unlock this feature.
         </AlertDescription>
       </Alert>
     </div>

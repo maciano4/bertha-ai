@@ -5,12 +5,13 @@ import SettingsPanel from "@/components/panels/SettingsPanel";
 import ActivityPanel from "@/components/panels/ActivityPanel";
 import SettingsModal from "@/components/modals/SettingsModal";
 import { Button } from "@/components/ui/button";
-import { Settings, Trash2 } from "lucide-react";
+import { Settings, Trash2, LayoutDashboard, CalendarDays } from "lucide-react";
+import { Link } from "wouter";
 
 export default function Home() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [customBackground, setCustomBackground] = useState<string | null>(null);
-  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("conversation"));
 
   // Load custom background from localStorage
   useEffect(() => {
@@ -58,9 +59,9 @@ export default function Home() {
       {/* Main Chat Interface */}
       <div className="relative z-10 flex h-screen">
         {/* Chat Container */}
-        <div className="flex-1 flex flex-col lg:mr-80">
+        <div className="flex-1 min-w-0 flex flex-col lg:mr-80">
           {/* Header */}
-          <header className="blur-backdrop border-b border-border p-4 flex items-center justify-between">
+          <header className="blur-backdrop border-b border-border p-4 flex flex-wrap gap-3 items-center justify-between">
             <div className="flex items-center gap-3">
               {/* Bertha AI Avatar */}
               <div className="relative">
@@ -77,6 +78,14 @@ export default function Home() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <Link href="/appointments" className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-foreground/80 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" aria-label="Open appointments">
+                <CalendarDays className="h-4 w-4" />
+                <span className="hidden sm:inline">Appointments</span>
+              </Link>
+              <Link href="/dashboard" className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-foreground/80 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" aria-label="Open conversation dashboard">
+                <LayoutDashboard className="h-4 w-4" />
+                <span className="hidden sm:inline">Dashboard</span>
+              </Link>
               <Button
                 variant="ghost"
                 size="icon"

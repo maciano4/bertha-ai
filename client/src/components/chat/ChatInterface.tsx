@@ -9,7 +9,8 @@ import { ReminderNotifications } from "../reminders/ReminderNotifications";
 import { DailyPlanner } from "../planning/DailyPlanner";
 import type { MessageMetadata } from "@shared/schema";
 import { Button } from "@/components/ui/button";
-import { Volume2, VolumeX, Ear, EarOff } from "lucide-react";
+import { Ear, EarOff } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 
 interface ChatInterfaceProps {
   conversationId: string | null;
@@ -25,7 +26,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     wakeWordEnabled: true
   });
 
-  const { messages, isLoading, sendMessage, messagesEndRef, scrollToBottom } = useChat(conversationId);
+  const { messages, latestReply, isLoading, sendMessage, addAssistantMessage, historyError, messagesEndRef, scrollToBottom } = useChat(conversationId);
   const { speak, stopSpeaking, isSpeaking, setWakeWordCallbacks, initializeSpeechSynthesis, initializeAudioContext } = useSpeech();
   const { 
     isWakeWordListening, 
@@ -48,82 +49,83 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     }
   }, []);
 
+  // Keep the sidebar settings panel and the compact composer control in sync.
+  useEffect(() => {
+    const handleSettingsChange = (event: Event) => {
+      const updatedSettings = (event as CustomEvent<Partial<typeof settings>>).detail;
+      if (updatedSettings) {
+        setSettings(currentSettings => ({ ...currentSettings, ...updatedSettings }));
+      }
+    };
+
+    window.addEventListener("bertha-settings-changed", handleSettingsChange);
+    return () => window.removeEventListener("bertha-settings-changed", handleSettingsChange);
+  }, []);
+
   // Create conversation when first message is sent (stable callback to prevent wake word restarts)
   const handleSendMessage = useCallback(async (message: string) => {
-    // Only create conversation if we don't have one
-    if (!conversationId) {
-      console.log('🆕 Creating new conversation for:', message.slice(0, 30));
-      try {
-        const response = await fetch("/api/conversations", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title: message.slice(0, 50) + "..." })
-        });
-        const newConversation = await response.json();
-        console.log('✅ New conversation created:', newConversation.id);
-        onConversationStart(newConversation.id);
-      } catch (error) {
-        console.error("Failed to create conversation:", error);
-      }
-    } else {
-      console.log('💬 Continuing existing conversation:', conversationId.slice(0, 8));
-    }
-    
-    await sendMessage(message, settings);
+    const id = await sendMessage(message, settings);
+    if (id && id !== conversationId) onConversationStart(id);
   }, [conversationId, onConversationStart, sendMessage, settings]);
+  const sendMessageRef = useRef(handleSendMessage);
+  sendMessageRef.current = handleSendMessage;
+
+  const displayedRemindersRef = useRef(new Set<string>());
+  const appointmentReminders = useQuery<{ id: string; content: string }[]>({
+    queryKey: ["appointment-reminders"],
+    queryFn: async () => {
+      const response = await fetch("/api/appointments/reminders", { credentials: "same-origin" });
+      if (!response.ok) throw new Error("Appointment reminders are temporarily unavailable.");
+      return response.json();
+    },
+    refetchInterval: 30000,
+    refetchOnWindowFocus: true,
+  });
+  useEffect(() => {
+    for (const reminder of appointmentReminders.data || []) {
+      if (!displayedRemindersRef.current.has(reminder.id)) {
+        displayedRemindersRef.current.add(reminder.id);
+        addAssistantMessage(reminder.content, `appointment-reminder-${reminder.id}`);
+      }
+      fetch(`/api/appointments/${reminder.id}/reminder-ack`, { method: "POST", credentials: "same-origin" })
+        .catch(error => console.error("Reminder acknowledgement failed:", error));
+    }
+  }, [appointmentReminders.data, addAssistantMessage]);
 
   // Speech interruption is now handled directly in wake word detection
   // No need to pause/resume wake word detection during speech
 
-  // Handle AI response speech - look for LAST ASSISTANT message (ignore system messages)
+  // Handle AI response speech - only assistant messages are eligible.
   const lastSpokenMessageRef = useRef<string>('');
   useEffect(() => {
-    console.log('🔍 SPEECH EFFECT TRIGGERED:', {
-      speechEnabled: settings.speechEnabled,
-      messagesLength: messages.length,
-      isLoading,
-      lastMessageRole: messages.length > 0 ? messages[messages.length - 1].role : 'none'
-    });
+    if (!latestReply) return;
 
-    if (!settings.speechEnabled || !messages.length || isLoading) return;
-
-    // Find the LAST ASSISTANT MESSAGE (ignore system messages that may come after)
-    const lastAssistantMessage = [...messages].reverse().find(msg => msg.role === "assistant");
-    
-    console.log('🔍 Looking for last assistant message:', {
-      found: !!lastAssistantMessage,
-      content: lastAssistantMessage ? lastAssistantMessage.content.slice(0, 30) : 'none',
-      isLoading,
-      speechEnabled: settings.speechEnabled 
-    });
+    // System messages can be appended after an assistant response, so find
+    // the latest assistant message rather than checking only the last item.
+    const lastAssistantMessage = latestReply;
 
     if (lastAssistantMessage) {
       // Store last message for repeat functionality
       (window as any).lastBerthaSpokenMessage = lastAssistantMessage.content;
       
       // Prevent duplicate speech synthesis for the same message
-      const messageKey = `${lastAssistantMessage.content}-${messages.length}`;
+      const messageKey = `${lastAssistantMessage.id}:${lastAssistantMessage.content}`;
       if (lastSpokenMessageRef.current !== messageKey) {
         lastSpokenMessageRef.current = messageKey;
-        console.log('🎙️ SPEAKING ASSISTANT MESSAGE:', lastAssistantMessage.content.slice(0, 50) + '...');
-        // Immediate speech synthesis with no delay
-        speak(lastAssistantMessage.content);
-      } else {
-        console.log('⚠️ Skipping duplicate speech synthesis');
+        console.log('🎙️ Speaking new Bertha reply:', lastAssistantMessage.content.slice(0, 50) + '...');
+        if (settings.speechEnabled) speak(lastAssistantMessage.content);
       }
-    } else {
-      console.log('❌ No assistant message found to speak');
     }
     
     // Listen for repeat events
     const handleRepeat = (event: any) => {
       console.log('🔄 Handling repeat request for:', event.detail.slice(0, 50) + '...');
-      speak(event.detail);
+      if (settings.speechEnabled) speak(event.detail);
     };
     
     window.addEventListener('berthaRepeat', handleRepeat);
     return () => window.removeEventListener('berthaRepeat', handleRepeat);
-  }, [messages, settings.speechEnabled, speak, isLoading]);
+  }, [latestReply, settings.speechEnabled, speak]);
 
   // Wake word listening management (run only once on mount)
   useEffect(() => {
@@ -133,28 +135,15 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
       startWakeWordListening((message: string) => {
         console.log('Wake word message received:', message);
         // Use the existing handleSendMessage which properly manages conversation creation
-        handleSendMessage(message);
+        sendMessageRef.current(message);
       });
     }
     
     // Cleanup only on settings change or unmount
     return () => {
-      if (isWakeWordListening) {
-        console.log('🧹 Settings changed - stopping wake word listening');
-        stopWakeWordListening(true); // Clear conversation mode on settings change
-      }
+      stopWakeWordListening(true);
     };
   }, [settings.wakeWordEnabled]); // Only depend on wake word setting
-
-  // Separate cleanup effect that only runs on unmount
-  useEffect(() => {
-    return () => {
-      if (isWakeWordListening) {
-        console.log('🧹 Cleanup on unmount: stopping wake word listening');
-        stopWakeWordListening();
-      }
-    };
-  }, []); // Empty dependency array - only runs on mount/unmount
 
   // Initialize speech synthesis and audio context on first user interaction
   const handleUserInteraction = useCallback(() => {
@@ -168,12 +157,11 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
   }, [settings.speechEnabled, initializeSpeechSynthesis, initializeAudioContext]);
 
   const toggleSpeech = () => {
-    if (isSpeaking) {
-      stopSpeaking();
-    }
+    stopSpeaking();
     const newSettings = { ...settings, speechEnabled: !settings.speechEnabled };
     setSettings(newSettings);
     localStorage.setItem("bertha-settings", JSON.stringify(newSettings));
+    window.dispatchEvent(new CustomEvent("bertha-settings-changed", { detail: newSettings }));
     
     // Initialize speech synthesis and audio context when enabling speech
     if (newSettings.speechEnabled) {
@@ -185,13 +173,21 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     }
   };
 
+  useEffect(() => {
+    if (!settings.speechEnabled) stopSpeaking();
+  }, [settings.speechEnabled, stopSpeaking]);
+
+  useEffect(() => () => stopSpeaking(), [stopSpeaking]);
+
   return (
-    <div className="flex-1 flex flex-col" onClick={handleUserInteraction}>
+    <div className="flex-1 min-w-0 flex flex-col" onClick={handleUserInteraction}>
       {/* Reminder Notifications */}
       <ReminderNotifications />
       
       {/* Chat Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4" data-testid="chat-area">
+        {historyError && <p role="alert" className="text-sm text-destructive">This conversation could not be loaded. It may belong to another browser session or have expired after a server restart.</p>}
+        {appointmentReminders.error && <p role="status" className="text-sm text-destructive">Appointment reminders are temporarily unavailable. Bertha will retry automatically.</p>}
         {/* Daily Planner */}
         <DailyPlanner />
         
@@ -210,7 +206,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
 
         {/* Chat Messages */}
         {messages.map((message, index) => (
-          <div key={`${message.id}-${index}`}>
+          <div key={`${message.id}-${index}`} data-testid={message.id.startsWith("appointment-reminder-") ? message.id : undefined}>
             <MessageBubble
               message={message}
               showAvatar={message.role === "assistant"}
@@ -256,6 +252,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
           isLoading={isLoading}
           language={settings.language}
           speechEnabled={settings.speechEnabled}
+          onToggleSpeech={toggleSpeech}
         />
 
         {/* Wake Word Status Indicator */}
@@ -289,31 +286,6 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
               <>
                 <EarOff className="w-4 h-4 mr-1" />
                 Wake Word: Off
-              </>
-            )}
-          </Button>
-          
-          {settings.speechEnabled && !(window as any).speechSynthesisInitialized && (
-            <div className="text-xs text-muted-foreground px-2 py-1 bg-yellow-100 dark:bg-yellow-900 rounded-md">
-              👆 Click anywhere to enable voice responses
-            </div>
-          )}
-          
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={toggleSpeech}
-            data-testid="button-toggle-speech"
-          >
-            {settings.speechEnabled ? (
-              <>
-                <Volume2 className="w-4 h-4 mr-1" />
-                Speech On
-              </>
-            ) : (
-              <>
-                <VolumeX className="w-4 h-4 mr-1" />
-                Speech Off
               </>
             )}
           </Button>
