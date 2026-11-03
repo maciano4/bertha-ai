@@ -243,11 +243,21 @@ export function useSpeech() {
           }
           if (event.error !== 'canceled' && event.error !== 'interrupted') {
             console.error('Speech synthesis error:', event.error);
+            // Chrome refuses to talk until the page has been clicked/tapped at least once.
+            toast({
+              title: "Bertha can't speak yet",
+              description: event.error === 'not-allowed'
+                ? "Your browser blocks sound until you click or tap the page once. Click anywhere in Bertha, and she will speak her next reply."
+                : `Speech output failed (${event.error}). Her reply is shown in the chat.`,
+              duration: 8000
+            });
           }
           // No need to resume since we never paused
         };
         
         console.log('Starting speech synthesis...');
+        // Chrome can get stuck in a paused state; resuming first is harmless.
+        window.speechSynthesis.resume();
         window.speechSynthesis.speak(utterance);
       };
       
@@ -280,7 +290,7 @@ export function useSpeech() {
           }
         }, 300);
       }
-  }, []);
+  }, [toast]);
 
   // Initialize speech synthesis with user interaction
   const initializeSpeechSynthesis = useCallback(() => {
@@ -353,6 +363,10 @@ export function useSpeech() {
     recognition.onstart = () => {
       setIsListening(true);
     };
+
+    // Ask the "Hi Bertha" listener to release the microphone while this one runs.
+    const announceManual = (active: boolean) =>
+      window.dispatchEvent(new CustomEvent("bertha-manual-listening", { detail: { active } }));
 
     let hasSpokenText = false;
     
@@ -431,6 +445,7 @@ export function useSpeech() {
     recognition.onend = () => {
       console.log('Speech recognition ended');
       setIsListening(false);
+      announceManual(false);
       
       // If we haven't manually stopped and we're in auto-send mode with spoken text,
       // trigger auto-send immediately
@@ -457,7 +472,21 @@ export function useSpeech() {
     };
 
     recognitionRef.current = recognition;
-    recognition.start();
+    announceManual(true);
+    // Give the wake word listener a moment to let go of the microphone.
+    setTimeout(() => {
+      if (recognition._stopRequested) {
+        announceManual(false);
+        return;
+      }
+      try {
+        recognition.start();
+      } catch (error) {
+        console.error('Speech recognition start failed:', error);
+        setIsListening(false);
+        announceManual(false);
+      }
+    }, 250);
   }, [toast]);
 
   const stopListening = useCallback(() => {

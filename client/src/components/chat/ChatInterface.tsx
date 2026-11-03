@@ -9,7 +9,8 @@ import { ReminderNotifications } from "../reminders/ReminderNotifications";
 import { DailyPlanner } from "../planning/DailyPlanner";
 import type { MessageMetadata } from "@shared/schema";
 import { Button } from "@/components/ui/button";
-import { Ear, EarOff } from "lucide-react";
+import { Ear, EarOff, Mic, MicOff, ExternalLink } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
 
 interface ChatInterfaceProps {
@@ -28,13 +29,20 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
 
   const { messages, latestReply, isLoading, sendMessage, addAssistantMessage, historyError, messagesEndRef, scrollToBottom } = useChat(conversationId);
   const { speak, stopSpeaking, isSpeaking, setWakeWordCallbacks, initializeSpeechSynthesis, initializeAudioContext } = useSpeech();
-  const { 
-    isWakeWordListening, 
-    startWakeWordListening, 
-    stopWakeWordListening, 
-    pauseWakeWordDetection, 
-    resumeWakeWordDetection 
+  const {
+    isWakeWordListening,
+    status: wakeStatus,
+    statusMessage: wakeStatusMessage,
+    heardText,
+    isConversationActive,
+    inIframe,
+    startWakeWordListening,
+    stopWakeWordListening,
+    enableMicrophone,
   } = useWakeWordSpeech();
+  const { toast } = useToast();
+  // Browsers only allow speech output after the page has been clicked or tapped once.
+  const [hasInteracted, setHasInteracted] = useState(() => !!(navigator as any).userActivation?.hasBeenActive);
 
   // Auto-scroll when new messages arrive
   useEffect(() => {
@@ -45,7 +53,13 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
   useEffect(() => {
     const savedSettings = localStorage.getItem("bertha-settings");
     if (savedSettings) {
-      setSettings(JSON.parse(savedSettings));
+      // Merge: the side panel saves settings without wakeWordEnabled, which used to turn it off.
+      try {
+        const parsed = JSON.parse(savedSettings);
+        setSettings(current => ({ ...current, ...parsed, wakeWordEnabled: parsed.wakeWordEnabled !== false }));
+      } catch {
+        localStorage.removeItem("bertha-settings");
+      }
     }
   }, []);
 
@@ -69,6 +83,17 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
   }, [conversationId, onConversationStart, sendMessage, settings]);
   const sendMessageRef = useRef(handleSendMessage);
   sendMessageRef.current = handleSendMessage;
+  const isLoadingRef = useRef(isLoading);
+  isLoadingRef.current = isLoading;
+  // Something said while Bertha is still thinking waits here and is sent when she finishes (not thrown away).
+  const queuedWhileLoadingRef = useRef("");
+  useEffect(() => {
+    if (!isLoading && queuedWhileLoadingRef.current) {
+      const queued = queuedWhileLoadingRef.current;
+      queuedWhileLoadingRef.current = "";
+      sendMessageRef.current(queued);
+    }
+  }, [isLoading]);
 
   const displayedRemindersRef = useRef(new Set<string>());
   const appointmentReminders = useQuery<{ id: string; content: string }[]>({
@@ -134,8 +159,20 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
       // Start wake word listening with stable message handling  
       startWakeWordListening((message: string) => {
         console.log('Wake word message received:', message);
+        if (isLoadingRef.current) {
+          queuedWhileLoadingRef.current = `${queuedWhileLoadingRef.current} ${message}`.trim();
+          return;
+        }
+        toast({ title: "Bertha heard you", description: `"${message.slice(0, 60)}${message.length > 60 ? "..." : ""}"`, duration: 2500 });
         // Use the existing handleSendMessage which properly manages conversation creation
         sendMessageRef.current(message);
+      }, () => {
+        // Only the wake word was said: answer right away (no AI needed) and wait for the request.
+        addAssistantMessage("Yes, dear, I'm listening. What can I do for you?", `local-ack-${Date.now()}`);
+      }, () => {
+        // "Goodbye" / "that's all": leave conversation mode. (No wake phrase here, or her own voice would re-wake her.)
+        queuedWhileLoadingRef.current = "";
+        addAssistantMessage("Goodbye, dear. I will be right here when you need me.", `local-bye-${Date.now()}`);
       });
     }
     
@@ -147,6 +184,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
 
   // Initialize speech synthesis and audio context on first user interaction
   const handleUserInteraction = useCallback(() => {
+    setHasInteracted(true);
     if (settings.speechEnabled) {
       if (!(window as any).speechSynthesisInitialized) {
         initializeSpeechSynthesis();
@@ -256,31 +294,72 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
         />
 
         {/* Wake Word Status Indicator */}
-        {isWakeWordListening && (
+        {settings.wakeWordEnabled && (
+          <div className="text-center my-2 space-y-1" data-testid="wakeword-status" aria-live="polite">
+            {wakeStatus === "listening" ? (
+              <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm border ${isConversationActive ? "bg-green-50 dark:bg-green-900/20 border-green-300 dark:border-green-800 text-green-700 dark:text-green-300" : "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300"}`}>
+                <div className={`w-2 h-2 rounded-full animate-pulse ${isConversationActive ? "bg-green-500" : "bg-blue-500"}`} />
+                <span>{isConversationActive
+                  ? (isLoading ? "In conversation - Bertha is thinking..." : isSpeaking ? "In conversation - Bertha is speaking" : "In conversation - just talk (say \"goodbye\" to end)")
+                  : 'Say "Hi Bertha"'}</span>
+              </div>
+            ) : wakeStatus === "blocked" || wakeStatus === "unsupported" || wakeStatus === "error" ? (
+              <div role="alert" className="mx-auto max-w-xl rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-left text-sm text-destructive">
+                <div className="flex items-start gap-2">
+                  <MicOff className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{wakeStatusMessage || "Bertha can't hear you right now."}</span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {wakeStatus !== "unsupported" && (
+                    <Button size="sm" variant="secondary" onClick={() => { handleUserInteraction(); enableMicrophone(); }} data-testid="button-enable-mic">
+                      <Mic className="mr-1 h-4 w-4" /> Enable microphone
+                    </Button>
+                  )}
+                  {inIframe && (
+                    <Button size="sm" variant="secondary" onClick={() => window.open(window.location.href, "_blank", "noopener")} data-testid="button-open-tab">
+                      <ExternalLink className="mr-1 h-4 w-4" /> Open in new tab
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm border border-border text-muted-foreground">
+                <span>Starting the microphone...</span>
+                <Button size="sm" variant="ghost" className="h-6 px-2" onClick={() => { handleUserInteraction(); enableMicrophone(); }}>
+                  <Mic className="mr-1 h-3 w-3" /> Enable microphone
+                </Button>
+              </div>
+            )}
+            {heardText && (
+              <div className="text-xs text-muted-foreground" data-testid="text-heard">Heard: "{heardText}"</div>
+            )}
+          </div>
+        )}
+        {settings.speechEnabled && !hasInteracted && (
           <div className="text-center mb-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-full text-sm text-blue-700 dark:text-blue-300">
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
-              <span>Listening for "Bertha"...</span>
-            </div>
+            <button type="button" className="text-xs px-2 py-1 rounded-md bg-yellow-100 text-yellow-900 dark:bg-yellow-900 dark:text-yellow-100" onClick={handleUserInteraction}>
+              Click here once so Bertha can speak out loud (browsers block sound until you do)
+            </button>
           </div>
         )}
 
         {/* Quick Actions */}
         <div className="flex flex-wrap gap-2 mt-3 max-w-4xl mx-auto">
           <Button
-            variant={isWakeWordListening ? "default" : "secondary"}
+            variant={wakeStatus === "listening" ? "default" : "secondary"}
             size="sm"
             onClick={() => {
               const newSettings = { ...settings, wakeWordEnabled: !settings.wakeWordEnabled };
               setSettings(newSettings);
               localStorage.setItem("bertha-settings", JSON.stringify(newSettings));
+              window.dispatchEvent(new CustomEvent("bertha-settings-changed", { detail: newSettings }));
             }}
             data-testid="button-toggle-wakeword"
           >
             {settings.wakeWordEnabled ? (
               <>
                 <Ear className="w-4 h-4 mr-1" />
-                Wake Word: On
+                Wake Word: {wakeStatus === "listening" ? "On" : "On (not listening)"}
               </>
             ) : (
               <>

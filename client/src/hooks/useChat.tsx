@@ -22,6 +22,26 @@ export interface ChatSettings {
   searchEnabled: boolean;
 }
 
+const isLocalOnly = (id: string) => id.startsWith("local-") || id.startsWith("appointment-reminder-");
+
+// Turns a failed /api/chat response into plain words for the fallback reply.
+function describeChatError(error: unknown): { short: string; detail: string; ai: boolean } {
+  const text = (error instanceof Error ? error.message : String(error)).slice(0, 240);
+  if (/insufficient_quota|quota|billing|credit/i.test(text)) {
+    return { ai: true, short: "the OpenAI account is out of credits", detail: `OpenAI says there are no credits left. Add credits, or put a new OPENAI_API_KEY in Replit Secrets. (${text})` };
+  }
+  if (/invalid_api_key|incorrect api key|OpenAI 401/i.test(text)) {
+    return { ai: true, short: "the OpenAI API key is missing or invalid", detail: `Check OPENAI_API_KEY in Replit Secrets. (${text})` };
+  }
+  if (/AI service unavailable|OpenAI|AI response/i.test(text)) {
+    return { ai: true, short: "the AI service returned an error", detail: text };
+  }
+  if (/Failed to fetch|NetworkError|Load failed/i.test(text)) {
+    return { ai: false, short: "I could not reach the Bertha server", detail: "The server did not answer. Check that the Replit app is running." };
+  }
+  return { ai: false, short: "the server returned an error", detail: text };
+}
+
 export function useChat(conversationId: string | null) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [latestReply, setLatestReply] = useState<Message | null>(null);
@@ -44,9 +64,14 @@ export function useChat(conversationId: string | null) {
   });
   useEffect(() => {
     if (history.data && !busyRef.current) {
-      setMessages(history.data.map((message: any) => ({
+      const saved: Message[] = history.data.map((message: any) => ({
         ...message, timestamp: new Date(message.createdAt),
-      })));
+      }));
+      // Keep messages that only exist in this browser (fallback replies, reminders).
+      setMessages(current => {
+        const localOnly = current.filter(item => isLocalOnly(item.id) && !saved.some(message => message.id === item.id));
+        return [...saved, ...localOnly].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      });
     }
   }, [history.data]);
 
@@ -79,8 +104,9 @@ export function useChat(conversationId: string | null) {
     if (!content.trim() || busyRef.current) return null;
     busyRef.current = true;
     setIsLoading(true);
+    const userMessageId = crypto.randomUUID();
     setMessages(previous => [...previous, {
-      id: crypto.randomUUID(), role: "user", content: content.trim(), timestamp: new Date(),
+      id: userMessageId, role: "user", content: content.trim(), timestamp: new Date(),
     }]);
     try {
       let targetId = activeConversationRef.current;
@@ -93,13 +119,24 @@ export function useChat(conversationId: string | null) {
       await sendMessageMutation.mutateAsync({ message: content.trim(), settings, targetId });
       return targetId;
     } catch (error) {
-      toast({ title: "Message not sent", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+      const reason = describeChatError(error);
+      console.error("Chat request failed:", error);
+      // The server did not save this exchange, so keep both bubbles locally.
+      setMessages(previous => previous.map(item => item.id === userMessageId ? { ...item, id: `local-${userMessageId}` } : item));
+      // Always answer, so a voice request never ends in silence.
+      addAssistantMessage(
+        reason.ai
+          ? `I heard you, dear, but my AI service is unavailable right now (${reason.short}). I can still help with your appointments.`
+          : `I heard you, dear, but I could not answer just now (${reason.short}). Please try again in a moment.`,
+        `local-fallback-${userMessageId}`,
+      );
+      toast({ title: reason.ai ? "Bertha's AI service is unavailable" : "Message not sent", description: reason.detail, variant: "destructive", duration: 10000 });
       return activeConversationRef.current;
     } finally {
       busyRef.current = false;
       setIsLoading(false);
     }
-  }, [sendMessageMutation, toast]);
+  }, [addAssistantMessage, sendMessageMutation, toast]);
 
   const addSystemMessage = useCallback((content: string) => {
     setMessages(previous => [...previous, { id: crypto.randomUUID(), role: "system", content, timestamp: new Date() }]);

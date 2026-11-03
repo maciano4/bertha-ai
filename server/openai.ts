@@ -49,15 +49,12 @@ export async function generateChatResponse(
   recognizedUser?: string
 ): Promise<ChatResponse> {
   try {
-    // Perform NLP analysis on the user's message
+    // The NLP analysis makes 6-7 separate gpt-4o calls before Bertha even starts to answer. That made
+    // every turn take many seconds, which breaks a spoken back-and-forth, and a one-word reply could be
+    // mis-detected as another language and flip her into translating. It is now off unless BERTHA_NLP=1.
     let nlpAnalysis: NLPAnalysis | undefined;
-    if (includeNLP) {
+    if (includeNLP && process.env.BERTHA_NLP === "1") {
       nlpAnalysis = await performNLPAnalysis(userInput, conversationHistory);
-      
-      // Use detected language if not explicitly provided
-      if (language === "en" && nlpAnalysis.language !== "en") {
-        language = nlpAnalysis.language;
-      }
     }
     
     // Add real-time information for time-related queries
@@ -93,6 +90,12 @@ export async function generateChatResponse(
     - For TIME/DATE questions: Keep short like "It's 3 PM now" or "It's Sunday, dear"
     - NEVER use emojis in ANY response.
     
+    CONVERSATION RULES:
+    - This is one continuous, spoken conversation. The earlier messages are what you and the user already said, so remember them.
+    - Understand short follow-ups ("and tomorrow?", "why?", "tell me more", "yes", "what about him?") from what was just discussed.
+    - Do not greet again or reintroduce yourself after the first message. Pick up where you left off.
+    - If a reply would be long, finish your last sentence cleanly and invite the user to ask for more.
+
     Response language: ${language === "en" ? "English" : `Translate your response to language code: ${language}`}`;
 
     // Add voice recognition context
@@ -124,7 +127,7 @@ export async function generateChatResponse(
 
     const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
       { role: "system", content: systemPrompt },
-      ...conversationHistory.slice(-6).map(msg => ({
+      ...conversationHistory.filter(msg => msg.role === "user" || msg.role === "assistant").slice(-20).map(msg => ({
         role: msg.role as "user" | "assistant",
         content: msg.content
       })),
@@ -134,7 +137,7 @@ export async function generateChatResponse(
     const response = await openai.chat.completions.create({
       model: "gpt-3.5-turbo",
       messages,
-      max_completion_tokens: 150,
+      max_completion_tokens: 300,
       temperature: 0.7,
       top_p: 0.9
     });
@@ -149,7 +152,11 @@ export async function generateChatResponse(
     };
   } catch (error) {
     console.error("OpenAI API error:", error);
-    throw new Error("Failed to generate AI response. Please check your OpenAI API key configuration.");
+    // Pass the provider's status and code (e.g. 429 insufficient_quota) on so the app can say why.
+    const status = (error as any)?.status;
+    const code = (error as any)?.code || (error as any)?.error?.code || (error as any)?.type;
+    const detail = [status, code].filter(Boolean).join(" ");
+    throw new Error(`AI service unavailable (OpenAI${detail ? ` ${detail}` : ""}). ${status === 401 ? "Check the OPENAI_API_KEY secret." : status === 429 && code === "insufficient_quota" ? "The OpenAI account is out of credits." : "Please try again later."}`);
   }
 }
 
