@@ -1,7 +1,7 @@
 import type { Express, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { generateChatResponse, streamChatResponse, translateText, analyzeImage, toAIError, AIError, CHAT_MODEL } from "./openai";
+import { generateChatResponse, streamChatResponse, translateText, analyzeImage, toAIError, AIError, CHAT_MODEL, modelFor, type ChatContext } from "./openai";
 import { voiceProfileStorage, analyzeVoiceInput, type VoiceProfile } from "./voiceProfiles";
 import { ObjectStorageService } from "./objectStorage";
 import { WeatherService } from "./weatherService";
@@ -13,20 +13,24 @@ import { registerAppointmentRoutes, handleAppointmentChat, handleReminderChat, l
 import { describeTime, validTimeZone } from "./appointmentDates";
 import { registerAuthRoutes, requireAuth } from "./auth";
 import * as chats from "./chatStore";
+import { registerBotRoutes, registerPublicBotRoutes, getChatBot } from "./bots";
+import { assertCanSendMessage, recordMessage, LimitError } from "./limits";
 
 const WRITING_REQUEST = /^\s*(?:(?:hey\s+|hi\s+)?bertha[,\s]+)?(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:help\s+me\s+)?(?:write|draft|compose|rewrite|reword|proofread|polish|translate)\b/i;
 
 function sendError(res: Response, error: unknown, fallback: string) {
-  if (error instanceof AIError) return res.status(error.status).json({ error: error.message, code: error.code });
+  if (error instanceof AIError || error instanceof LimitError) return res.status(error.status).json({ error: error.message, code: error.code });
   console.error(fallback, error);
   return res.status(500).json({ error: fallback, code: "server_error" });
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
   registerAuthRoutes(app);
+  registerPublicBotRoutes(app); // share-link cards work signed out
   // Everything else under /api needs a signed-in account; data is scoped to req.user.id.
   app.use("/api", requireAuth);
   registerAppointmentRoutes(app);
+  registerBotRoutes(app);
   // Voice profile endpoints
   app.post("/api/voice/profiles", async (req, res) => {
     try {
@@ -350,8 +354,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!conversation) return res.status(404).json({ error: "Conversation not found." });
       }
       const convId = conversation?.id;
+      // Which bot answers: the conversation's bot, else body.botId, else Bertha (null).
+      const botId = conversation ? conversation.botId : (typeof req.body?.botId === "string" && req.body.botId ? req.body.botId : null);
+      const bot = botId ? await getChatBot(botId, user.id) : null;
+      if (botId && !bot) return res.status(403).json({ error: "This bot is no longer shared, so you can't chat with it. Your earlier messages are still here.", code: "bot_unavailable" });
+      await assertCanSendMessage(user.id);
       const quickReply = async (response: string, metadata: Record<string, unknown>) => {
         await chats.saveExchange(convId, message, response, metadata);
+        await recordMessage(user.id, false).catch(error => console.error("usage count failed", error));
         return res.json({ response, searchUsed: false, translationUsed: false, conversationId: convId, timestamp: new Date().toISOString(), ...metadata });
       };
 
@@ -401,7 +411,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (lastAssistant) return quickReply(lastAssistant.content, { isRepeat: true });
       }
 
-      if (/^(hi|hello|hey|good morning|good afternoon|good evening|how are you|what's up)[\s,.!?]*(bertha)?[\s.!?]*$/i.test(message.trim())) {
+      if (!bot && /^(hi|hello|hey|good morning|good afternoon|good evening|how are you|what's up)[\s,.!?]*(bertha)?[\s.!?]*$/i.test(message.trim())) {
         const quickResponses = ["Hello dear", "Hello, my child", "Hi there, dear", "Good to see you", "I'm well, thank you dear", "Hello my precious"];
         return quickReply(quickResponses[Math.floor(Math.random() * quickResponses.length)], { isQuickResponse: true });
       }
@@ -410,17 +420,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .filter(item => item.status === "scheduled" && new Date(item.endAt).getTime() > Date.now())
         .slice(0, 15)
         .map(item => `${item.title} — ${describeTime(item.startsAt, item.timeZone)}${item.location ? ` at ${item.location}` : ""}`);
-      const ctx = { language, timeZone, userName: user.displayName, recognizedUser, upcomingAppointments };
-      const metadata = { model: CHAT_MODEL, translationUsed: language !== "en" };
+      const ctx: ChatContext = {
+        language, timeZone, userName: user.displayName, recognizedUser, upcomingAppointments,
+        bot: bot ? { name: bot.name, instructions: bot.instructions, model: bot.model, showInstructions: bot.showInstructions } : null,
+      };
+      const metadata = { model: modelFor(ctx), translationUsed: language !== "en", ...(bot ? { botId: bot.id } : {}) };
+      const sorry = bot ? "Sorry, I couldn't put an answer together. Please ask me again." : "I'm sorry, dear, I couldn't put an answer together. Please ask me again.";
+      const countAI = () => recordMessage(user.id, true).catch(error => console.error("usage count failed", error));
 
       if (req.body?.stream !== true) {
         const ai = await generateChatResponse(message, conversationHistory, ctx);
         await chats.saveExchange(convId, message, ai.content, metadata);
+        await countAI();
         return res.json({ response: ai.content, searchUsed: false, translationUsed: ai.translationUsed, recognizedUser, conversationId: convId, timestamp: new Date().toISOString() });
       }
 
       // Throws (bad key, no credits...) before any bytes are sent, so errors stay clean JSON.
       const stream = await streamChatResponse(message, conversationHistory, ctx);
+      await countAI();
       res.status(200);
       res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
       res.setHeader("X-Accel-Buffering", "no");
@@ -439,7 +456,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!clientGone) res.end(JSON.stringify({ type: "error", error: aiError.message, code: aiError.code, partial: full }) + "\n");
         return;
       }
-      const response = full.trim() || "I'm sorry, dear, I couldn't put an answer together. Please ask me again.";
+      const response = full.trim() || sorry;
       await chats.saveExchange(convId, message, response, metadata);
       if (!clientGone) res.end(JSON.stringify({ type: "done", response, searchUsed: false, translationUsed: metadata.translationUsed, recognizedUser, conversationId: convId, timestamp: new Date().toISOString() }) + "\n");
     } catch (error) {
@@ -486,12 +503,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/conversations", async (req, res) => {
-    try { res.json(await chats.listConversations(req.user!.id)); }
+    try {
+      const all = await chats.listConversations(req.user!.id);
+      const filter = typeof req.query.botId === "string" ? req.query.botId : undefined; // "bertha" = built-in bot
+      res.json(filter === undefined ? all : all.filter((c: any) => (c.botId ?? "bertha") === filter));
+    }
     catch (error) { sendError(res, error, "Could not load your conversations."); }
   });
 
   app.post("/api/conversations", async (req, res) => {
-    try { res.status(201).json(await chats.createConversation(req.user!.id, req.body?.title)); }
+    try {
+      const botId = typeof req.body?.botId === "string" && req.body.botId && req.body.botId !== "bertha" ? req.body.botId : null;
+      if (botId && !await getChatBot(botId, req.user!.id)) return res.status(404).json({ error: "That bot doesn't exist or isn't shared.", code: "bot_not_found" });
+      res.status(201).json(await chats.createConversation(req.user!.id, req.body?.title, botId));
+    }
     catch (error) { sendError(res, error, "Failed to create conversation"); }
   });
 

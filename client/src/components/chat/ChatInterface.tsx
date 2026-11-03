@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useChat } from "@/hooks/useChat";
 import { useSpeech } from "@/hooks/useSpeech";
-import { useWakeWordSpeech } from "@/hooks/useWakeWordSpeech";
+import { useWakeWordSpeech, setBotWakeName } from "@/hooks/useWakeWordSpeech";
+import { BERTHA, type ChatBot } from "@/lib/bots";
+import BotAvatar from "@/components/bots/BotAvatar";
 import MessageBubble from "./MessageBubble";
 import ChatInput from "./ChatInput";
 import { NLPInsights } from "@/components/nlp/NLPInsights";
@@ -15,6 +17,8 @@ import { useQuery } from "@tanstack/react-query";
 interface ChatInterfaceProps {
   conversationId: string | null;
   onConversationStart: (id: string) => void;
+  /** Who answers. Defaults to Bertha. */
+  bot?: ChatBot;
 }
 
 const WRITING_STARTERS = [
@@ -24,7 +28,16 @@ const WRITING_STARTERS = [
   { label: "Cover letter", icon: FileText, text: "Write a cover letter for the [job title] job at [company]. A bit about me: " },
 ];
 
-export default function ChatInterface({ conversationId, onConversationStart }: ChatInterfaceProps) {
+export default function ChatInterface({ conversationId, onConversationStart, bot = BERTHA }: ChatInterfaceProps) {
+  const isBertha = !bot.id;
+  const botRef = useRef(bot);
+  botRef.current = bot;
+  // Custom bots speak with their own browser voice, rate and pitch; Bertha keeps her usual voice.
+  const voiceFor = (current: ChatBot) => current.id ? { voiceName: current.voiceName, rate: current.voiceRate, pitch: current.voicePitch } : undefined;
+  useEffect(() => {
+    setBotWakeName(bot.id ? bot.name : null);
+    return () => setBotWakeName(null);
+  }, [bot.id, bot.name]);
   const [settings, setSettings] = useState({
     language: "en",
     speechEnabled: true, // Enable speech by default for Bertha
@@ -33,7 +46,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     wakeWordEnabled: true
   });
 
-  const { messages, latestReply, isLoading, isStreaming, sendMessage, addAssistantMessage, historyError, messagesEndRef, scrollToBottom } = useChat(conversationId);
+  const { messages, latestReply, isLoading, isStreaming, sendMessage, addAssistantMessage, historyError, messagesEndRef, scrollToBottom } = useChat(conversationId, { id: bot.id, name: bot.name });
   const [prefill, setPrefill] = useState<{ text: string; nonce: number } | undefined>(undefined);
   const { speak, stopSpeaking, isSpeaking, setWakeWordCallbacks, initializeSpeechSynthesis, initializeAudioContext } = useSpeech();
   const {
@@ -146,14 +159,14 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
       if (lastSpokenMessageRef.current !== messageKey) {
         lastSpokenMessageRef.current = messageKey;
         console.log('🎙️ Speaking new Bertha reply:', lastAssistantMessage.content.slice(0, 50) + '...');
-        if (settings.speechEnabled) speak(spoken);
+        if (settings.speechEnabled) speak(spoken, 1, voiceFor(botRef.current));
       }
     }
     
     // Listen for repeat events
     const handleRepeat = (event: any) => {
       console.log('🔄 Handling repeat request for:', event.detail.slice(0, 50) + '...');
-      if (settings.speechEnabled) speak(event.detail);
+      if (settings.speechEnabled) speak(event.detail, 1, voiceFor(botRef.current));
     };
     
     window.addEventListener('berthaRepeat', handleRepeat);
@@ -171,16 +184,16 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
           queuedWhileLoadingRef.current = `${queuedWhileLoadingRef.current} ${message}`.trim();
           return;
         }
-        toast({ title: "Bertha heard you", description: `"${message.slice(0, 60)}${message.length > 60 ? "..." : ""}"`, duration: 2500 });
+        toast({ title: `${botRef.current.name} heard you`, description: `"${message.slice(0, 60)}${message.length > 60 ? "..." : ""}"`, duration: 2500 });
         // Use the existing handleSendMessage which properly manages conversation creation
         sendMessageRef.current(message);
       }, () => {
         // Only the wake word was said: answer right away (no AI needed) and wait for the request.
-        addAssistantMessage("Yes, dear, I'm listening. What can I do for you?", `local-ack-${Date.now()}`);
+        addAssistantMessage(botRef.current.id ? "I'm listening. What can I do for you?" : "Yes, dear, I'm listening. What can I do for you?", `local-ack-${Date.now()}`);
       }, () => {
         // "Goodbye" / "that's all": leave conversation mode. (No wake phrase here, or her own voice would re-wake her.)
         queuedWhileLoadingRef.current = "";
-        addAssistantMessage("Goodbye, dear. I will be right here when you need me.", `local-bye-${Date.now()}`);
+        addAssistantMessage(botRef.current.id ? "Goodbye! I'll be right here when you need me." : "Goodbye, dear. I will be right here when you need me.", `local-bye-${Date.now()}`);
       });
     }
     
@@ -237,10 +250,13 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
             message={{
               id: "welcome",
               role: "assistant",
-              content: settings.wakeWordEnabled ? "Ah, hello there, my dear child! I am Bertha, your wise grandmother from the beautiful lands of Cameroon. Just say 'Bertha' followed by whatever is on your heart, and I will listen with all the love of a grandmother. You can also type or click the small microphone if you prefer. Now then, what brings you to visit with old Bertha today?" : "Hello, my precious child! I am Bertha, a loving grandmother from Cameroon who has seen many seasons and learned much along the way. I am here to listen, to share stories, to offer wisdom, and to care for you as a grandmother would. What is on your heart today, dear one?",
+              content: !isBertha
+                ? (bot.greeting || `Hi! I'm ${bot.name}. How can I help?`)
+                : settings.wakeWordEnabled ? "Ah, hello there, my dear child! I am Bertha, your wise grandmother from the beautiful lands of Cameroon. Just say 'Bertha' followed by whatever is on your heart, and I will listen with all the love of a grandmother. You can also type or click the small microphone if you prefer. Now then, what brings you to visit with old Bertha today?" : "Hello, my precious child! I am Bertha, a loving grandmother from Cameroon who has seen many seasons and learned much along the way. I am here to listen, to share stories, to offer wisdom, and to care for you as a grandmother would. What is on your heart today, dear one?",
               timestamp: new Date()
             }}
             showAvatar
+            assistant={bot}
           />
         )}
 
@@ -250,6 +266,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
             <MessageBubble
               message={message}
               showAvatar={message.role === "assistant"}
+              assistant={bot}
               data-testid={`message-${message.role}-${message.id}`}
             />
             {/* Show NLP insights for user messages if available */}
@@ -268,11 +285,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
         {isLoading && !isStreaming && (
           <div className="message-bubble ai-message p-4 rounded-lg shadow-sm">
             <div className="flex items-start gap-3">
-              <img 
-                src="https://images.unsplash.com/photo-1677442136019-21780ecad995?q=80&w=40&h=40&fit=crop" 
-                alt="Bertha AI" 
-                className="w-8 h-8 rounded-full object-cover"
-              />
+              <BotAvatar emoji={bot.avatarEmoji} url={bot.avatarUrl} name={bot.name} className="w-8 h-8 text-lg" />
               <div className="typing-indicator">
                 <span className="typing-dot"></span>
                 <span className="typing-dot"></span>
@@ -298,6 +311,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
           ))}
         </div>
         <ChatInput 
+          botName={bot.name}
           prefill={prefill}
           onSendMessage={handleSendMessage}
           isLoading={isLoading}
@@ -313,14 +327,14 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
               <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm border ${isConversationActive ? "bg-green-50 dark:bg-green-900/20 border-green-300 dark:border-green-800 text-green-700 dark:text-green-300" : "bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300"}`}>
                 <div className={`w-2 h-2 rounded-full animate-pulse ${isConversationActive ? "bg-green-500" : "bg-blue-500"}`} />
                 <span>{isConversationActive
-                  ? (isLoading ? "In conversation - Bertha is thinking..." : isSpeaking ? "In conversation - Bertha is speaking" : "In conversation - just talk (say \"goodbye\" to end)")
-                  : 'Say "Hi Bertha"'}</span>
+                  ? (isLoading ? `In conversation - ${bot.name} is thinking...` : isSpeaking ? `In conversation - ${bot.name} is speaking` : "In conversation - just talk (say \"goodbye\" to end)")
+                  : isBertha ? 'Say "Hi Bertha"' : `Say "Hi ${bot.name}" or "Hi Bertha"`}</span>
               </div>
             ) : wakeStatus === "blocked" || wakeStatus === "unsupported" || wakeStatus === "error" ? (
               <div role="alert" className="mx-auto max-w-xl rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-left text-sm text-destructive">
                 <div className="flex items-start gap-2">
                   <MicOff className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>{wakeStatusMessage || "Bertha can't hear you right now."}</span>
+                  <span>{wakeStatusMessage || `${bot.name} can't hear you right now.`}</span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {wakeStatus !== "unsupported" && (
@@ -351,7 +365,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
         {settings.speechEnabled && !hasInteracted && (
           <div className="text-center mb-2">
             <button type="button" className="text-xs px-2 py-1 rounded-md bg-yellow-100 text-yellow-900 dark:bg-yellow-900 dark:text-yellow-100" onClick={handleUserInteraction}>
-              Click here once so Bertha can speak out loud (browsers block sound until you do)
+              Click here once so {bot.name} can speak out loud (browsers block sound until you do)
             </button>
           </div>
         )}

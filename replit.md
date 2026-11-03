@@ -8,6 +8,26 @@ Bertha AI is an intelligent conversational assistant application built with a mo
 
 Preferred communication style: Simple, everyday language.
 
+## Stage 2 bot builder (branch `stage2-bots`)
+
+### What's new
+- **My Bots** page (`/bots`, `/bots/new`, `/bots/:id/edit`): create, edit, duplicate and delete custom bots, with templates (Tutor, Fitness Coach, Customer Support, Writing Assistant, Travel Planner), an "AI: help me write instructions" button, a voice picker with Test voice, and a live preview.
+- **Chat with any bot.** Each conversation has a `bot_id` (empty means Bertha). The sidebar has a bot switcher and a "this bot / all chats" filter. Bot instructions sit under the honesty and date rules. Voice replies use the bot's voice. "Hi Bertha" still works, and "Hi <bot name>" works too.
+- **Sharing.** Private, unlisted or public. `/b/<slug>` shows the bot card (signed-out visitors get a sign-up prompt). `/explore` lists public bots. Shared users chat in their own conversations; only the owner can edit; instructions are hidden by default.
+- **Usage tracking.** Bots and daily messages are counted; limits are off unless `BERTHA_ENFORCE_LIMITS=true` (see `server/limits.ts`, ready for Stripe in Stage 3).
+- **Code.** Server: `server/bots.ts`, `server/limits.ts`, plus changes to `server/openai.ts` (bot persona and prompt layering), `server/routes.ts`, `server/chatStore.ts`, `server/platformTables.ts` and `shared/schema.ts`. Client: `client/src/pages/bots.tsx`, `bot-editor.tsx`, `explore.tsx`, `bot-share.tsx`, `client/src/lib/bots.ts`, `client/src/components/bots/*`, and updates to the chat components and speech hooks.
+
+### Optional secrets
+- `BERTHA_BOT_MODELS`: comma-separated models bots may use (default `gpt-4o-mini, gpt-4o, gpt-4.1-mini, gpt-4.1`).
+- `OPENAI_BOT_BUILDER_MODEL`: model for the instruction writer (default `OPENAI_MODEL`).
+- `BERTHA_ENFORCE_LIMITS`, `BERTHA_FREE_MAX_BOTS` (default 50), `BERTHA_FREE_DAILY_MESSAGES` (default 1000).
+
+### Deploying this branch on Replit
+1. In the Shell: `git fetch github && git checkout -b stage2-bots github/stage2-bots` (if the branch already exists locally: `git checkout stage2-bots && git pull github stage2-bots`).
+2. Run `npm install`.
+3. Press **Run**. The new tables and columns are created automatically. **Don't run `db:push`.**
+4. Open **My Bots**, pick a template, save, then press **Chat with it**.
+
 ## Stage 1 platform upgrade (branch `stage1-platform`)
 
 ### What's new

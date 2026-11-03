@@ -8,6 +8,7 @@ export interface StoredConversation {
   id: string;
   userId: string;
   title: string;
+  botId: string | null; // null = Bertha
   createdAt: string;
   updatedAt: string;
 }
@@ -20,7 +21,7 @@ export interface StoredMessage {
   createdAt: string;
 }
 
-const conversationColumns = `id, user_id AS "userId", title, created_at AS "createdAt", updated_at AS "updatedAt"`;
+const conversationColumns = `id, user_id AS "userId", title, bot_id AS "botId", created_at AS "createdAt", updated_at AS "updatedAt"`;
 const messageColumns = `id, conversation_id AS "conversationId", role, content, metadata, created_at AS "createdAt"`;
 const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 
@@ -29,10 +30,11 @@ export function cleanTitle(title: unknown) {
   return (text || "New conversation").slice(0, 80);
 }
 
-export async function createConversation(userId: string, title: unknown): Promise<StoredConversation> {
+// The caller must check that the user may chat with botId (see getChatBot in bots.ts).
+export async function createConversation(userId: string, title: unknown, botId: string | null = null): Promise<StoredConversation> {
   const result = await pool.query(
-    `INSERT INTO bertha_conversations (id, user_id, title) VALUES ($1, $2, $3) RETURNING ${conversationColumns}`,
-    [randomUUID(), userId, cleanTitle(title)],
+    `INSERT INTO bertha_conversations (id, user_id, title, bot_id) VALUES ($1, $2, $3, $4) RETURNING ${conversationColumns}`,
+    [randomUUID(), userId, cleanTitle(title), botId],
   );
   return plain(result.rows[0]);
 }
@@ -46,7 +48,8 @@ export async function getConversation(userId: string, id: string): Promise<Store
 
 export async function listConversations(userId: string) {
   const result = await pool.query(`
-    SELECT c.id, c.user_id AS "userId", c.title, c.created_at AS "createdAt", c.updated_at AS "updatedAt",
+    SELECT c.id, c.user_id AS "userId", c.title, c.bot_id AS "botId", c.created_at AS "createdAt", c.updated_at AS "updatedAt",
+      b.name AS "botName", b.avatar_emoji AS "botAvatarEmoji", b.avatar_url AS "botAvatarUrl",
       COALESCE(s.count, 0)::int AS "messageCount",
       COALESCE(s.last_content, '') AS "lastMessage",
       COALESCE(s.last_at, c.updated_at) AS "lastActivityAt"
@@ -57,6 +60,7 @@ export async function listConversations(userId: string) {
         max(created_at) AS last_at
       FROM bertha_messages m WHERE m.conversation_id = c.id
     ) s ON true
+    LEFT JOIN bertha_bots b ON b.id = c.bot_id
     WHERE c.user_id = $1
     ORDER BY COALESCE(s.last_at, c.updated_at) DESC
     LIMIT 200`, [userId]);

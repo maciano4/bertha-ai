@@ -2,6 +2,8 @@ import { useState, useRef, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { isMobileDevice, isIOS, isAndroid } from "@/lib/mobileDetection";
 
+export interface VoiceOptions { voiceName?: string | null; rate?: number; pitch?: number }
+
 export function useSpeech() {
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -109,16 +111,17 @@ export function useSpeech() {
 
   // Chat replies use the browser's built-in speech synthesis so the feature
   // works without an API key and remains available on desktop and mobile.
-  const speak = useCallback((text: string, rate: number = 1.0) => {
+  // `voice` comes from a custom bot's settings; without it Bertha's usual voice is used.
+  const speak = useCallback((text: string, rate: number = 1.0, voice?: VoiceOptions) => {
     if (!text.trim()) return;
 
     // A new reply always replaces anything Bertha is currently saying.
     stopSpeaking();
-    speakWithBrowserTTS(text, rate);
+    speakWithBrowserTTS(text, rate, voice);
   }, [toast]);
 
   // Browser TTS fallback function
-  const speakWithBrowserTTS = useCallback((text: string, rate: number = 1.0) => {
+  const speakWithBrowserTTS = useCallback((text: string, rate: number = 1.0, voice?: VoiceOptions) => {
     console.log('🔊 Browser TTS requested. speechSynthesis available:', 'speechSynthesis' in window);
     
     if ('speechSynthesis' in window) {
@@ -128,7 +131,7 @@ export function useSpeech() {
       const startSpeaking = () => {
         // An iOS delay can outlive a newer reply; do not let stale speech start.
         if (requestId !== speechRequestIdRef.current) return;
-        speakBrowserTTSInternal(text, rate, requestId);
+        speakBrowserTTSInternal(text, rate, requestId, voice);
       };
 
       // iOS Safari workaround: small delay before speaking
@@ -159,7 +162,8 @@ export function useSpeech() {
   const speakBrowserTTSInternal = useCallback((
     text: string,
     rate: number = 1.0,
-    requestId?: number
+    requestId?: number,
+    voice?: VoiceOptions
   ) => {
     if (!('speechSynthesis' in window)) return;
       
@@ -177,7 +181,8 @@ export function useSpeech() {
         ];
         const femaleNamePattern = /\b(linda|susan|anna|karen|sarah|emma|sophie|marie|claire|victoria|female)\b/i;
         const maleNamePattern = /\b(male|man|david|richard|mark|alex|daniel)\b/i;
-        const selectedVoice =
+        const botVoice = voice?.voiceName ? voiceList.find(v => v.name === voice.voiceName) : undefined;
+        const selectedVoice = botVoice ||
           voiceList.find(voice => {
             const name = voice.name.toLowerCase();
             return preferredFemaleNames.some(preferred =>
@@ -207,8 +212,8 @@ export function useSpeech() {
         
         // Natural conversational delivery: close to the browser default, with
         // a small pitch lift to avoid sounding flat on generic voices.
-        utterance.rate = Math.min(1.05, Math.max(0.95, rate));
-        utterance.pitch = 1.08;
+        utterance.rate = voice ? Math.min(2, Math.max(0.5, voice.rate ?? 1)) : Math.min(1.05, Math.max(0.95, rate));
+        utterance.pitch = voice ? Math.min(2, Math.max(0, voice.pitch ?? 1)) : 1.08;
         utterance.volume = 1;
         
         utterance.onstart = () => {

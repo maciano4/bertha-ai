@@ -2,6 +2,20 @@
 
 Bertha is a voice-first personal assistant with a warm grandmother persona. You can talk to her ("Hi Bertha"), type to her, have her save appointments and reminders, and have her write texts, emails, social posts and cover letters.
 
+## What's new in Stage 2: build and share your own bots
+
+- **My Bots** (`/bots`). Create, edit, duplicate and delete your own assistants. Each bot has a name, a short description, instructions (its role and personality), a greeting, an emoji or picture, a browser voice (voice, speed, pitch), an optional AI model, and a sharing setting.
+  - Start from a template: **Tutor**, **Fitness Coach**, **Customer Support**, **Writing Assistant** or **Travel Planner**, or start from scratch.
+  - **AI: help me write instructions** drafts (or improves) the instructions from the name and description. If the OpenAI account is out of credits you get a plain message saying so.
+  - A **live preview** shows the bot's card and greeting as you type. **Test voice** speaks the greeting with the chosen voice.
+- **Chat with any bot.** Every conversation belongs to one bot (Bertha is the default). The chat list has a **bot switcher** and a filter (this bot / all chats). Bot instructions are added on top of the honesty, date and safety rules, which they can't override. Writing tools, appointments and reminders work with every bot. Voice replies use the bot's voice settings. "Hi Bertha" always works, and you can also say "Hi <bot name>" (a greeting word is needed so the name alone doesn't wake it).
+- **Sharing.** Each bot is **Private** (only you), **Unlisted** (anyone with the link) or **Public** (the link, plus the **Explore** page). The link is `/b/<slug>`.
+  - People who aren't signed in see the bot's card and greeting, plus a sign-up / log-in prompt.
+  - Signed-in people chat with the bot in their own private conversations. The creator can't read them.
+  - A share link only lets people chat. Only the creator can change the bot. Instructions stay hidden unless the creator turns on **Show instructions**. **New link** replaces the old link.
+- **Usage tracking (groundwork for paid plans).** Bot count and messages per day (UTC) are tracked per user (`bertha_usage_daily`). Limits are **not enforced** unless `BERTHA_ENFORCE_LIMITS=true`. `server/limits.ts` has the hooks for Stripe plans in Stage 3.
+- New tables `bertha_bots` and `bertha_usage_daily`, a `bot_id` column on `bertha_conversations` and a `plan` column on `bertha_users` are created automatically on server start. No `db:push` is needed.
+
 ## What's new in Stage 1
 
 - **Accounts.** You sign up with an email and password. Passwords are hashed with bcrypt. Sessions are kept in Postgres behind an httpOnly cookie, so you stay signed in for 90 days, even when the server restarts. Each person sees only their own chats and appointments.
@@ -33,6 +47,11 @@ Bertha is a voice-first personal assistant with a warm grandmother persona. You 
 | `SESSION_STORE` | no | `memory` keeps sessions in memory instead of Postgres (local testing only). |
 | `DB_DRIVER` | no | `neon` forces the Neon serverless driver. Otherwise it's picked automatically (Neon for `*.neon.tech`, `pg` for everything else). |
 | `DB_POOL_MAX` | no | Maximum Postgres connections. Defaults to 10. |
+| `BERTHA_BOT_MODELS` | no | Comma-separated list of models a bot may pick, for example `gpt-4o-mini,gpt-4o`. Defaults to `gpt-4o-mini, gpt-4o, gpt-4.1-mini, gpt-4.1` plus `OPENAI_MODEL`. This stops bots from choosing models you don't want to pay for. |
+| `OPENAI_BOT_BUILDER_MODEL` | no | The model behind "AI: help me write instructions". Defaults to `OPENAI_MODEL`. |
+| `BERTHA_ENFORCE_LIMITS` | no | `true` turns on the free-plan limits below. Off by default. |
+| `BERTHA_FREE_MAX_BOTS` | no | Bots per user when limits are on. Defaults to 50. |
+| `BERTHA_FREE_DAILY_MESSAGES` | no | Messages per user per UTC day when limits are on. Defaults to 1000. |
 
 ## Running it
 
@@ -43,13 +62,13 @@ npm run check      # type check
 npm run build && npm start   # production
 ```
 
-The database tables (`bertha_users`, `bertha_conversations`, `bertha_messages`, `bertha_sessions`, `bertha_appointments`) are created automatically when the server starts, so no migration step is needed. Open the app, choose **Create an account**, and start chatting.
+The database tables (`bertha_users`, `bertha_conversations`, `bertha_messages`, `bertha_sessions`, `bertha_appointments`, `bertha_bots`, `bertha_usage_daily`) are created automatically when the server starts, so no migration step is needed. Open the app, choose **Create an account**, and start chatting.
 
 ### About `npm run db:push`
 
 You don't need to run it. `shared/schema.ts` still contains older, unused tables (households, shopping lists and so on), so `drizzle-kit push` would offer to create those as well. If you do run it, read the statements it lists before confirming.
 
-## API overview (all under `/api`, all require sign-in except `/api/auth/*`)
+## API overview (all under `/api`, all require sign-in except `/api/auth/*` and `/api/public/*`)
 
 - **Accounts.** `POST /auth/signup` with `{email, password, displayName?, timeZone?}`. Also `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` and `PATCH /auth/me`.
 - **Conversations.** `GET /conversations` and `POST /conversations`, `GET/PATCH/DELETE /conversations/:id`, and `GET /conversations/:id/messages`.
@@ -58,3 +77,7 @@ You don't need to run it. `shared/schema.ts` still contains older, unused tables
   - With `stream: true` it returns NDJSON lines: `{"type":"delta","text":...}`, then either `{"type":"done","response":...}` or `{"type":"error","error":...,"code":...}`.
   - Errors are `{error, code}`, using codes such as `no_api_key`, `invalid_api_key`, `insufficient_quota`, `rate_limited` and `ai_timeout`.
 - **Appointments.** `GET/POST /appointments`, `PATCH/DELETE /appointments/:id`, and `GET /appointments/reminders`.
+- **Bots.** `GET /bots` (yours), `POST /bots`, `GET /bots/:id` (the full bot for its owner; only the public card for others; 404 if private), `PATCH /bots/:id` and `DELETE /bots/:id` (owner only, `403 not_owner` otherwise), `POST /bots/:id/duplicate`, `POST /bots/:id/new-link`, `GET /bots/explore?q=` (public bots), `GET /bots/options` (allowed models and usage), `POST /bots/draft-instructions` with `{name, description, current?}`, and `GET /usage`.
+  - Limits: name up to 60 characters, description 300, instructions 8000, greeting 500. Pictures must be `https://` links or small uploaded images.
+- **Shared card (no sign-in needed).** `GET /public/bots/:slug` returns the card for unlisted and public bots. It never includes the owner's email, the model or (unless allowed) the instructions.
+- **Chatting with a bot.** `POST /conversations` with `{title, botId}`, then `POST /chat` as usual. The bot comes from the conversation. `GET /conversations?botId=<id|bertha>` filters the list. A bot that has been made private or deleted returns `403 bot_unavailable`. With limits on, `429 limit_reached`.

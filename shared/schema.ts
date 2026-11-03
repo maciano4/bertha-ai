@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, jsonb, boolean, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, jsonb, boolean, index, integer, real, date, primaryKey } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -208,16 +208,54 @@ export const berthaUsers = pgTable("bertha_users", {
   passwordHash: text("password_hash").notNull(),
   displayName: text("display_name"),
   timeZone: text("time_zone"),
+  plan: text("plan").notNull().default("free"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// Custom bots ("Bertha" herself is the built-in default and has no row).
+export const berthaBots = pgTable("bertha_bots", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => berthaUsers.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  description: text("description").notNull().default(""),
+  instructions: text("instructions").notNull().default(""),
+  greeting: text("greeting").notNull().default(""),
+  avatarEmoji: text("avatar_emoji").notNull().default("🤖"),
+  avatarUrl: text("avatar_url"),
+  voiceName: text("voice_name"),
+  voiceRate: real("voice_rate").notNull().default(1),
+  voicePitch: real("voice_pitch").notNull().default(1),
+  model: text("model"),
+  visibility: text("visibility").notNull().default("private"),
+  slug: text("slug").notNull().unique("bertha_bots_slug_unique"),
+  showInstructions: boolean("show_instructions").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  index("bertha_bots_owner_updated").on(table.ownerId, table.updatedAt),
+  index("bertha_bots_visibility_updated").on(table.visibility, table.updatedAt),
+]);
+
+// Per-user daily counters: groundwork for plan limits (Stage 3 / Stripe).
+export const berthaUsageDaily = pgTable("bertha_usage_daily", {
+  userId: text("user_id").notNull().references(() => berthaUsers.id, { onDelete: "cascade" }),
+  day: date("day").notNull(),
+  messages: integer("messages").notNull().default(0),
+  aiMessages: integer("ai_messages").notNull().default(0),
+}, table => [primaryKey({ columns: [table.userId, table.day], name: "bertha_usage_daily_pk" })]);
 
 export const berthaConversations = pgTable("bertha_conversations", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => berthaUsers.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
+  // null = the built-in Bertha bot
+  botId: text("bot_id").references(() => berthaBots.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, table => [index("bertha_conversations_user_updated").on(table.userId, table.updatedAt)]);
+}, table => [
+  index("bertha_conversations_user_updated").on(table.userId, table.updatedAt),
+  index("bertha_conversations_bot").on(table.botId),
+]);
 
 export const berthaMessages = pgTable("bertha_messages", {
   id: text("id").primaryKey(),

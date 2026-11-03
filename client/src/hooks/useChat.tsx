@@ -30,9 +30,11 @@ class ChatError extends Error {
 }
 
 // Turns a failed /api/chat response into plain words for the fallback reply.
-function describeChatError(error: unknown): { short: string; detail: string; ai: boolean } {
+function describeChatError(error: unknown): { short: string; detail: string; ai: boolean; code?: string } {
   const text = (error instanceof Error ? error.message : String(error)).slice(0, 300);
   const code = error instanceof ChatError ? error.code : undefined;
+  if (code === "bot_unavailable" || code === "bot_not_found") return { ai: false, code, short: "this bot is no longer shared", detail: text };
+  if (code === "limit_reached") return { ai: false, code, short: "you've reached today's message limit", detail: text };
   if (code === "insufficient_quota" || /insufficient_quota|out of credits/i.test(text)) {
     return { ai: true, short: "the OpenAI account is out of credits", detail: text };
   }
@@ -58,7 +60,9 @@ async function readError(response: Response) {
   }
 }
 
-export function useChat(conversationId: string | null) {
+// botId: the custom bot new conversations are started with (null = Bertha).
+export function useChat(conversationId: string | null, bot: { id: string | null; name: string } = { id: null, name: "Bertha" }) {
+  const isBertha = !bot.id;
   const [messages, setMessages] = useState<Message[]>([]);
   const [latestReply, setLatestReply] = useState<Message | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -184,7 +188,7 @@ export function useChat(conversationId: string | null) {
     try {
       let targetId = activeConversationRef.current;
       if (!targetId) {
-        const response = await apiRequest("POST", "/api/conversations", { title: content.trim().slice(0, 80) });
+        const response = await apiRequest("POST", "/api/conversations", { title: content.trim().slice(0, 80), botId: bot.id });
         const conversation = await response.json();
         targetId = conversation.id as string;
         activeConversationRef.current = targetId;
@@ -206,19 +210,21 @@ export function useChat(conversationId: string | null) {
       addAssistantMessage(
         partial
           ? `${partial.text}\n\n(My answer was cut off: ${reason.short}. Please ask again.)`
+          : reason.code === "bot_unavailable" || reason.code === "bot_not_found"
+          ? `${bot.name} isn't available any more: its creator stopped sharing it or deleted it. You can still read this chat, or pick another bot.`
           : reason.ai
-          ? `I heard you, dear, but my AI service is unavailable right now (${reason.short}). I can still save appointments and reminders for you.`
-          : `I heard you, dear, but I could not answer just now (${reason.short}). Please try again in a moment.`,
+          ? `I heard you${isBertha ? ", dear" : ""}, but my AI service is unavailable right now (${reason.short}). I can still save appointments and reminders for you.`
+          : `I heard you${isBertha ? ", dear" : ""}, but I could not answer just now (${reason.short}). Please try again in a moment.`,
         `local-fallback-${userMessageId}`,
       );
-      toast({ title: reason.ai ? "Bertha's AI service is unavailable" : "Message not sent", description: reason.detail, variant: "destructive", duration: 10000 });
+      toast({ title: reason.ai ? `${bot.name}'s AI service is unavailable` : "Message not sent", description: reason.detail, variant: "destructive", duration: 10000 });
       return activeConversationRef.current;
     } finally {
       busyRef.current = false;
       setIsLoading(false);
       setStreamingId(null);
     }
-  }, [addAssistantMessage, postChat, toast, cache]);
+  }, [addAssistantMessage, postChat, toast, cache, bot.id, bot.name, isBertha]);
 
   const addSystemMessage = useCallback((content: string) => {
     setMessages(previous => [...previous, { id: crypto.randomUUID(), role: "system", content, timestamp: new Date() }]);

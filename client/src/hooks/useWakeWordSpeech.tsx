@@ -21,9 +21,20 @@ const tidy = (text: string) =>
  * "Hey Berta, what time is it?" -> { matched: true, command: "what time is it?" }
  * "What's the weather, Bertha" -> { matched: true, command: "What's the weather" }
  */
+// A custom bot can also be woken with "Hi <BotName>". A greeting is required, so the bot's
+// name said in the middle of a sentence doesn't wake it. "Hi Bertha" always works too.
+let botWake: RegExp | null = null;
+export function setBotWakeName(name: string | null | undefined) {
+  const clean = (name || "").toLowerCase().replace(/[^a-z0-9' ]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!clean || clean.length < 3 || /^(bertha|bot|assistant|the)$/.test(clean)) { botWake = null; return; }
+  const first = clean.split(" ")[0];
+  const names = Array.from(new Set([clean, first.length >= 3 ? first : clean])).map(n => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "[\\s,]+"));
+  botWake = new RegExp(`(?:^|\\b)(?:${GREETING})[\\s,.!]*(?:${names.join("|")})\\b`, "i");
+}
+
 export function extractWakeCommand(transcript: string): { matched: boolean; command: string } {
   const text = transcript.trim();
-  const match = STRONG_WAKE.exec(text) || LOOSE_WAKE.exec(text);
+  const match = STRONG_WAKE.exec(text) || LOOSE_WAKE.exec(text) || (botWake ? botWake.exec(text) : null);
   if (!match) return { matched: false, command: "" };
 
   let command = tidy(text.slice(match.index + match[0].length));

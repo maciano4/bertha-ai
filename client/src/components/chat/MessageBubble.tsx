@@ -3,6 +3,8 @@ import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
 import { Check, Copy } from "lucide-react";
 import { copyText, copyToClipboard, splitDraft } from "@/lib/drafts";
+import BotAvatar from "@/components/bots/BotAvatar";
+import { BERTHA, type ChatBot } from "@/lib/bots";
 
 function CopyButton({ text, label = "Copy", testId }: { text: string; label?: string; testId: string }) {
   const [copied, setCopied] = useState(false);
@@ -50,9 +52,10 @@ function AssistantContent({ content, canCopy }: { content: string; canCopy: bool
 interface MessageBubbleProps {
   message: Message;
   showAvatar?: boolean;
+  assistant?: ChatBot;
 }
 
-export default function MessageBubble({ message, showAvatar }: MessageBubbleProps) {
+export default function MessageBubble({ message, showAvatar, assistant = BERTHA }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
   const [userProfilePicture, setUserProfilePicture] = useState<string | null>(null);
@@ -92,16 +95,20 @@ export default function MessageBubble({ message, showAvatar }: MessageBubbleProp
     )}>
       {!isUser && showAvatar ? (
         <div className="flex items-start gap-3">
-          <img 
-            src={userProfilePicture || "https://images.unsplash.com/photo-1677442136019-21780ecad995?q=80&w=40&h=40&fit=crop"} 
-            alt={message.metadata?.recognizedUser ? `${message.metadata.recognizedUser}'s profile` : "Bertha AI"} 
-            className="w-8 h-8 rounded-full flex-shrink-0 object-cover"
-            data-testid="img-avatar"
-          />
+          {userProfilePicture ? (
+            <img
+              src={userProfilePicture}
+              alt={`${message.metadata?.recognizedUser}'s profile`}
+              className="w-8 h-8 rounded-full flex-shrink-0 object-cover"
+              data-testid="img-avatar"
+            />
+          ) : (
+            <BotAvatar emoji={assistant.avatarEmoji} url={assistant.avatarUrl} name={assistant.name} className="w-8 h-8 text-lg" />
+          )}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <p className="font-medium text-sm text-muted-foreground">
-                {message.metadata?.recognizedUser ? `Bertha (talking to ${message.metadata.recognizedUser})` : "Bertha AI"}
+                {message.metadata?.recognizedUser ? `${assistant.name} (talking to ${message.metadata.recognizedUser})` : assistant.id ? assistant.name : "Bertha AI"}
               </p>
               {message.metadata?.searchUsed && (
                 <span className="text-xs text-accent-foreground bg-accent px-2 py-1 rounded-full">

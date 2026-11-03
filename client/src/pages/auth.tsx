@@ -4,7 +4,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/useAuth";
 
-export default function AuthPage({ initialMode = "login" }: { initialMode?: "login" | "signup" }) {
+// `embedded` renders just the card (used under a shared bot's card on /b/<slug>).
+export default function AuthPage({ initialMode = "login", embedded = false, signupText }: { initialMode?: "login" | "signup"; embedded?: boolean; signupText?: string }) {
   const { login, signup } = useAuth();
   const [mode, setMode] = useState<"login" | "signup">(initialMode);
   const [email, setEmail] = useState("");
@@ -32,7 +33,7 @@ export default function AuthPage({ initialMode = "login" }: { initialMode?: "log
   const switchMode = () => { setMode(isSignup ? "login" : "signup"); setError(null); };
 
   return (
-    <main className="chat-background min-h-screen flex items-center justify-center p-4">
+    <main className={embedded ? "flex justify-center" : "chat-background min-h-screen flex items-center justify-center p-4"}>
       <div className="w-full max-w-sm rounded-2xl border border-border bg-background/95 p-6 shadow-xl">
         <div className="mb-6 flex flex-col items-center text-center">
           <img
@@ -42,7 +43,7 @@ export default function AuthPage({ initialMode = "login" }: { initialMode?: "log
           />
           <h1 className="text-2xl font-bold text-foreground">{isSignup ? "Create your Bertha account" : "Welcome back"}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {isSignup ? "Your chats and appointments are saved to your account and follow you to any device." : "Log in to see your chats and appointments."}
+            {isSignup && signupText ? signupText : isSignup ? "Your chats and appointments are saved to your account and follow you to any device." : "Log in to see your chats and appointments."}
           </p>
         </div>
         <form onSubmit={submit} className="space-y-4" noValidate>

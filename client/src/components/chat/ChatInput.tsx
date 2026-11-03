@@ -15,9 +15,12 @@ interface ChatInputProps {
   onToggleSpeech?: () => void;
   /** Text to place in the box (e.g. from a writing chip); a new nonce re-applies it. */
   prefill?: { text: string; nonce: number };
+  /** Name of whoever answers (Bertha or a custom bot), for the placeholder. */
+  botName?: string;
 }
 
 export default function ChatInput({
+  botName = "Bertha",
   onSendMessage,
   isLoading,
   language,
@@ -238,7 +241,7 @@ export default function ChatInput({
           value={message}
           onChange={(e) => handleInputChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type your message to Bertha..."
+          placeholder={`Type your message to ${botName}...`}
           className="resize-none min-h-[3rem] max-h-32 pr-16"
           rows={1}
           data-testid="input-message"
