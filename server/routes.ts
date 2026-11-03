@@ -1,43 +1,32 @@
-import type { Express } from "express";
+import type { Express, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { generateChatResponse, translateText, analyzeImage } from "./openai";
+import { generateChatResponse, streamChatResponse, translateText, analyzeImage, toAIError, AIError, CHAT_MODEL } from "./openai";
 import { voiceProfileStorage, analyzeVoiceInput, type VoiceProfile } from "./voiceProfiles";
 import { ObjectStorageService } from "./objectStorage";
-import { reminderService } from "./reminderService";
 import { WeatherService } from "./weatherService";
 import { elevenLabsService } from "./elevenLabsService";
 import { insertMessageSchema, insertUserSettingsSchema } from "@shared/schema";
 import { z } from "zod";
 import multer from "multer";
-import { registerAppointmentRoutes, handleAppointmentChat } from "./appointments";
+import { registerAppointmentRoutes, handleAppointmentChat, handleReminderChat, listAppointments } from "./appointments";
+import { describeTime, validTimeZone } from "./appointmentDates";
+import { registerAuthRoutes, requireAuth } from "./auth";
+import * as chats from "./chatStore";
 
-// Simple web search using Google (fallback implementation)
-async function performWebSearch(query: string): Promise<string> {
-  try {
-    // In a real implementation, you would use Google Search API
-    // For now, return a placeholder that indicates search was attempted
-    return `Web search performed for: "${query}". To enable full web search functionality, configure Google Search API.`;
-  } catch (error) {
-    console.error("Web search error:", error);
-    return "Web search unavailable.";
-  }
+const WRITING_REQUEST = /^\s*(?:(?:hey\s+|hi\s+)?bertha[,\s]+)?(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:help\s+me\s+)?(?:write|draft|compose|rewrite|reword|proofread|polish|translate)\b/i;
+
+function sendError(res: Response, error: unknown, fallback: string) {
+  if (error instanceof AIError) return res.status(error.status).json({ error: error.message, code: error.code });
+  console.error(fallback, error);
+  return res.status(500).json({ error: fallback, code: "server_error" });
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  registerAuthRoutes(app);
+  // Everything else under /api needs a signed-in account; data is scoped to req.user.id.
+  app.use("/api", requireAuth);
   registerAppointmentRoutes(app);
-  // Conversation identifiers alone must never grant access to another visitor's history.
-  app.use("/api", async (req, res, next) => {
-    const pathId = /^\/conversations\/([^/]+)/.exec(req.path)?.[1];
-    const id = pathId || (req.path === "/chat" ? req.body?.conversationId : null);
-    if (id) {
-      const conversation = await storage.getConversation(id);
-      if (!conversation || conversation.userId !== req.sessionID) {
-        return res.status(404).json({ error: "Conversation not found in this browser session." });
-      }
-    }
-    next();
-  });
   // Voice profile endpoints
   app.post("/api/voice/profiles", async (req, res) => {
     try {
@@ -155,53 +144,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Reminder and planning endpoints
-  app.get("/api/reminders/due", async (req, res) => {
-    try {
-      const dueReminders = await reminderService.getDueReminders();
-      res.json(dueReminders);
-    } catch (error) {
-      console.error("Error getting due reminders:", error);
-      res.status(500).json({ error: "Failed to get due reminders" });
-    }
-  });
-
-  app.get("/api/reminders/check", async (req, res) => {
-    try {
-      const notifications = await reminderService.checkAndNotifyDueReminders();
-      res.json({ notifications });
-    } catch (error) {
-      console.error("Error checking reminders:", error);
-      res.status(500).json({ error: "Failed to check reminders" });
-    }
-  });
-
-  app.get("/api/plans/today", async (req, res) => {
-    try {
-      const todaysPlan = await reminderService.getTodaysPlan();
-      res.json(todaysPlan);
-    } catch (error) {
-      console.error("Error getting today's plan:", error);
-      res.status(500).json({ error: "Failed to get today's plan" });
-    }
-  });
-
-  app.get("/api/plans/:date", async (req, res) => {
-    try {
-      const { date } = req.params;
-      
-      // Validate date format (YYYY-MM-DD)
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-        return res.status(400).json({ error: "Invalid date format. Use YYYY-MM-DD" });
-      }
-
-      const plan = await reminderService.getPlanForDate(date);
-      res.json(plan);
-    } catch (error) {
-      console.error(`Error getting plan for ${req.params.date}:`, error);
-      res.status(500).json({ error: "Failed to get plan for specified date" });
-    }
-  });
+  // The old global reminder/daily-plan system stored data without an owner, so one account
+  // could see another's reminders. Reminders now live in each user's appointments
+  // (see handleReminderChat); these endpoints stay so older clients don't error.
+  app.get("/api/reminders/due", (_req, res) => res.json([]));
+  app.get("/api/reminders/check", (_req, res) => res.json({ notifications: [] }));
+  app.get("/api/plans/today", (_req, res) => res.json(null));
+  app.get("/api/plans/:date", (_req, res) => res.json(null));
 
   // Weather endpoints
   const weatherService = new WeatherService();
@@ -383,192 +332,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Chat endpoint
+  // Chat endpoint. Order: reminders -> appointments -> weather -> repeat -> greeting -> AI.
+  // Send {stream: true} to receive newline-delimited JSON: {"type":"delta","text"} ... {"type":"done",...}.
   app.post("/api/chat", async (req, res) => {
+    const user = req.user!;
+    const { message, conversationId, language = "en" } = req.body ?? {};
+    if (!message || typeof message !== "string" || !message.trim()) {
+      return res.status(400).json({ error: "Message is required" });
+    }
+    if (message.length > 8000) return res.status(400).json({ error: "That message is too long. Please keep it under 8,000 characters." });
+    const timeZone = validTimeZone(req.body?.timeZone || user.timeZone);
+
     try {
-      const { message, conversationId, language = "en", searchEnabled = true } = req.body;
-
-      if (!message || typeof message !== "string") {
-        return res.status(400).json({ error: "Message is required" });
+      let conversation: chats.StoredConversation | null = null;
+      if (conversationId) {
+        conversation = await chats.getConversation(user.id, String(conversationId));
+        if (!conversation) return res.status(404).json({ error: "Conversation not found." });
       }
+      const convId = conversation?.id;
+      const quickReply = async (response: string, metadata: Record<string, unknown>) => {
+        await chats.saveExchange(convId, message, response, metadata);
+        return res.json({ response, searchUsed: false, translationUsed: false, conversationId: convId, timestamp: new Date().toISOString(), ...metadata });
+      };
 
-      const appointmentReply = await handleAppointmentChat(message, req.sessionID, req.body.timeZone);
-      if (appointmentReply !== null) {
-        if (conversationId) {
-          await storage.createMessage({ conversationId, role: "user", content: message, metadata: null });
-          await storage.createMessage({ conversationId, role: "assistant", content: appointmentReply, metadata: { appointment: true } });
-        }
-        return res.json({ response: appointmentReply, searchUsed: false, translationUsed: false, timestamp: new Date().toISOString() });
-      }
+      const reminderReply = await handleReminderChat(message, user.id, timeZone);
+      if (reminderReply !== null) return quickReply(reminderReply, { isReminderResponse: true, appointment: true });
 
-      // Check for reminder or planning requests first
-      const reminderParseResult = await reminderService.parseReminderCommand(message);
-      
-      if (reminderParseResult.hasReminder || reminderParseResult.hasPlanningRequest) {
-        const reminderResponse = await reminderService.processReminderRequest(message);
-        
-        // Save user message and reminder response
-        if (conversationId) {
-          await storage.createMessage({
-            conversationId,
-            role: "user",
-            content: message,
-            metadata: null
-          });
+      const appointmentReply = await handleAppointmentChat(message, user.id, timeZone);
+      if (appointmentReply !== null) return quickReply(appointmentReply, { appointment: true });
 
-          await storage.createMessage({
-            conversationId,
-            role: "assistant",
-            content: reminderResponse,
-            metadata: {
-              isReminderResponse: true,
-              reminderType: reminderParseResult.hasPlanningRequest ? 'planning' : 'reminder'
-            }
-          });
-        }
-
-        return res.json({
-          response: reminderResponse,
-          searchUsed: false,
-          translationUsed: false,
-          isReminderResponse: true
-        });
-      }
-
-      // Check for weather requests
-      const weatherPatterns = [
-        /weather/i,
-        /temperature/i,
-        /rain/i,
-        /snow/i,
-        /forecast/i,
-        /sunny/i,
-        /cloudy/i,
-        /humid/i,
-        /wind/i,
-        /what's it like/i,
-        /how's the weather/i,
-        /weather like/i
-      ];
-
-      const isWeatherRequest = weatherPatterns.some(pattern => pattern.test(message));
-      
+      // Weather (live data from the weather service) unless this is a writing request.
+      const isWeatherRequest = !WRITING_REQUEST.test(message) &&
+        /\b(weather|temperature outside|forecast|raining|rainy|will it rain|snowing|will it snow|sunny|cloudy|humid|humidity|windy)\b|what's it like outside|how's the weather/i.test(message);
       if (isWeatherRequest) {
         try {
-          // Extract location from message or use default
-          let location = "New York"; // Default location (US Eastern time)
-          
-          // Try to extract location from common patterns
+          let location = "New York";
           const locationPatterns = [
-            /weather in ([^?]+)/i,
-            /weather for ([^?]+)/i,
-            /weather at ([^?]+)/i,
-            /temperature in ([^?]+)/i,
-            /forecast for ([^?]+)/i,
-            /forecast in ([^?]+)/i,
-            /what's it like in ([^?]+)/i,
-            /how's the weather in ([^?]+)/i
+            /weather (?:in|for|at) ([^?.!]+)/i, /temperature in ([^?.!]+)/i, /forecast (?:for|in) ([^?.!]+)/i,
+            /what's it like in ([^?.!]+)/i, /how's the weather in ([^?.!]+)/i, /\b(?:rain|snow|sunny|cloudy) in ([^?.!]+)/i,
           ];
-
           for (const pattern of locationPatterns) {
             const match = message.match(pattern);
-            if (match && match[1]) {
-              location = match[1].trim().replace(/\?$/, '');
-              break;
-            }
+            if (match?.[1]) { location = match[1].replace(/\b(today|tomorrow|now|right now|this week)\b/gi, "").trim() || location; break; }
           }
-
-          // Get weather data
           const weatherData = await weatherService.getWeatherByLocation(location);
-          
           if (weatherData.current) {
-            const weatherResponse = weatherService.formatWeatherResponse(weatherData);
-            
-            // Save user message and weather response
-            if (conversationId) {
-              await storage.createMessage({
-                conversationId,
-                role: "user",
-                content: message,
-                metadata: null
-              });
-
-              await storage.createMessage({
-                conversationId,
-                role: "assistant",
-                content: weatherResponse,
-                metadata: {
-                  isWeatherResponse: true,
-                  location: location
-                }
-              });
-            }
-
-            return res.json({
-              response: weatherResponse,
-              searchUsed: false,
-              translationUsed: false,
-              isWeatherResponse: true,
-              location: location
-            });
-          } else {
-            // If weather data not found, provide a helpful message
-            const errorResponse = `I'm sorry, dear. I couldn't find weather information for "${location}". Could you try a different city name or check the spelling?`;
-            
-            if (conversationId) {
-              await storage.createMessage({
-                conversationId,
-                role: "user",
-                content: message,
-                metadata: null
-              });
-
-              await storage.createMessage({
-                conversationId,
-                role: "assistant",
-                content: errorResponse,
-                metadata: {
-                  isWeatherResponse: true,
-                  error: "location_not_found"
-                }
-              });
-            }
-
-            return res.json({
-              response: errorResponse,
-              searchUsed: false,
-              translationUsed: false,
-              isWeatherResponse: true,
-              error: "location_not_found"
-            });
+            return quickReply(weatherService.formatWeatherResponse(weatherData), { isWeatherResponse: true, location });
           }
+          return quickReply(`I'm sorry, dear. I couldn't find weather information for "${location}". Could you try a different city name or check the spelling?`, { isWeatherResponse: true, error: "location_not_found" });
         } catch (error) {
           console.error("Error getting weather in chat:", error);
-          // Fall through to regular AI response if weather fails
+          // fall through to the AI, which will say it has no live weather
         }
       }
 
-      // Get conversation history
-      const messages = conversationId 
-        ? await storage.getConversationMessages(conversationId)
-        : [];
+      const messages = convId ? await chats.getMessages(convId, 40) : [];
+      const conversationHistory = messages.map(msg => ({ role: msg.role, content: msg.content }));
 
-      const conversationHistory = messages.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }));
-
-      // Check for simple greetings to optimize performance
-      const simpleGreetings = /^(hi|hello|hey|good morning|good afternoon|good evening|how are you|what's up)$/i;
-      const isSimpleGreeting = simpleGreetings.test(message.trim());
-      
-      // Skip web search for simple greetings to speed up response
-      let searchResults = "";
-      if (!isSimpleGreeting && searchEnabled && (message.includes("?") || message.includes("what") || message.includes("how"))) {
-        searchResults = await performWebSearch(message);
-      }
-
-      // Check for voice recognition if message contains speech
       let recognizedUser: string | null = null;
       const voiceMatch = voiceProfileStorage.findMatch(message, language);
       if (voiceMatch && voiceMatch.confidence > 0.6) {
@@ -576,145 +396,55 @@ export async function registerRoutes(app: Express): Promise<Server> {
         voiceProfileStorage.updateUsage(voiceMatch.profileId);
       }
 
-      // Check if user is asking to repeat the last response
-      const repeatPatterns = [
-        /can you repeat/i,
-        /repeat that/i,
-        /say that again/i,
-        /what did you say/i,
-        /repeat please/i,
-        /repeat last/i
-      ];
-      
-      const isRepeatRequest = repeatPatterns.some(pattern => pattern.test(message.trim()));
-      
-      if (isRepeatRequest && messages.length > 0) {
-        // Find the last assistant message
-        const lastAssistantMessage = [...messages].reverse().find(m => m.role === 'assistant');
-        
-        if (lastAssistantMessage) {
-          console.log('🔄 Repeat request detected - returning last assistant message:', lastAssistantMessage.content.slice(0, 50));
-          
-          // Save user message
-          if (conversationId) {
-            await storage.createMessage({
-              conversationId,
-              role: "user",
-              content: message,
-              metadata: null
-            });
+      if (/can you repeat|repeat that|say that again|what did you say|repeat please|repeat last/i.test(message.trim())) {
+        const lastAssistant = [...messages].reverse().find(m => m.role === "assistant");
+        if (lastAssistant) return quickReply(lastAssistant.content, { isRepeat: true });
+      }
 
-            // Save the repeated assistant message
-            await storage.createMessage({
-              conversationId,
-              role: "assistant",
-              content: lastAssistantMessage.content,
-              metadata: {
-                isRepeat: true
-              }
-            });
-          }
+      if (/^(hi|hello|hey|good morning|good afternoon|good evening|how are you|what's up)[\s,.!?]*(bertha)?[\s.!?]*$/i.test(message.trim())) {
+        const quickResponses = ["Hello dear", "Hello, my child", "Hi there, dear", "Good to see you", "I'm well, thank you dear", "Hello my precious"];
+        return quickReply(quickResponses[Math.floor(Math.random() * quickResponses.length)], { isQuickResponse: true });
+      }
 
-          return res.json({
-            response: lastAssistantMessage.content,
-            searchUsed: false,
-            translationUsed: false,
-            isRepeat: true
-          });
+      const upcomingAppointments = (await listAppointments(user.id).catch(() => []))
+        .filter(item => item.status === "scheduled" && new Date(item.endAt).getTime() > Date.now())
+        .slice(0, 15)
+        .map(item => `${item.title} — ${describeTime(item.startsAt, item.timeZone)}${item.location ? ` at ${item.location}` : ""}`);
+      const ctx = { language, timeZone, userName: user.displayName, recognizedUser, upcomingAppointments };
+      const metadata = { model: CHAT_MODEL, translationUsed: language !== "en" };
+
+      if (req.body?.stream !== true) {
+        const ai = await generateChatResponse(message, conversationHistory, ctx);
+        await chats.saveExchange(convId, message, ai.content, metadata);
+        return res.json({ response: ai.content, searchUsed: false, translationUsed: ai.translationUsed, recognizedUser, conversationId: convId, timestamp: new Date().toISOString() });
+      }
+
+      // Throws (bad key, no credits...) before any bytes are sent, so errors stay clean JSON.
+      const stream = await streamChatResponse(message, conversationHistory, ctx);
+      res.status(200);
+      res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+      res.setHeader("X-Accel-Buffering", "no");
+      res.flushHeaders();
+      let full = "";
+      let clientGone = false;
+      res.on("close", () => { clientGone = !res.writableEnded; });
+      try {
+        for await (const text of stream) {
+          full += text;
+          if (!clientGone) res.write(JSON.stringify({ type: "delta", text }) + "\n");
         }
+      } catch (error) {
+        const aiError = toAIError(error);
+        if (full.trim()) await chats.saveExchange(convId, message, full.trim(), { ...metadata, incomplete: true }).catch(() => {});
+        if (!clientGone) res.end(JSON.stringify({ type: "error", error: aiError.message, code: aiError.code, partial: full }) + "\n");
+        return;
       }
-
-      // For simple greetings, provide instant responses to achieve 1-second target
-      if (isSimpleGreeting) {
-        const quickResponses = [
-          "Hello dear",
-          "Hello, my child",
-          "Hi there, dear",
-          "Good to see you",
-          "I'm well, thank you dear",
-          "Hello my precious"
-        ];
-        
-        const quickResponse = quickResponses[Math.floor(Math.random() * quickResponses.length)];
-        
-        // Save messages quickly
-        if (conversationId) {
-          await storage.createMessage({
-            conversationId,
-            role: "user",
-            content: message,
-            metadata: null
-          });
-
-          await storage.createMessage({
-            conversationId,
-            role: "assistant",
-            content: quickResponse,
-            metadata: { isQuickResponse: true }
-          });
-        }
-
-        return res.json({
-          response: quickResponse,
-          searchUsed: false,
-          translationUsed: false,
-          isQuickResponse: true,
-          timestamp: new Date().toISOString()
-        });
-      }
-
-      // For complex messages, use full AI response
-      const aiResponse = await generateChatResponse(
-        message,
-        conversationHistory,
-        language,
-        searchResults,
-        true, // Enable NLP analysis for complex messages
-        recognizedUser || undefined // Pass recognized user
-      );
-
-      // Save user message if conversation exists
-      if (conversationId) {
-        await storage.createMessage({
-          conversationId,
-          role: "user",
-          content: message,
-          metadata: aiResponse.nlpAnalysis ? {
-            intent: aiResponse.nlpAnalysis.intent,
-            sentiment: aiResponse.nlpAnalysis.sentiment,
-            entities: aiResponse.nlpAnalysis.entities,
-            keywords: aiResponse.nlpAnalysis.keywords
-          } : null
-        });
-
-        // Save AI response
-        await storage.createMessage({
-          conversationId,
-          role: "assistant",
-          content: aiResponse.content,
-          metadata: {
-            searchUsed: aiResponse.searchUsed,
-            translationUsed: aiResponse.translationUsed,
-            searchResults: searchResults || undefined,
-            nlpAnalysis: aiResponse.nlpAnalysis
-          }
-        });
-      }
-
-
-      res.json({
-        response: aiResponse.content,
-        searchUsed: aiResponse.searchUsed,
-        translationUsed: aiResponse.translationUsed,
-        recognizedUser,
-        timestamp: new Date().toISOString()
-      });
-
+      const response = full.trim() || "I'm sorry, dear, I couldn't put an answer together. Please ask me again.";
+      await chats.saveExchange(convId, message, response, metadata);
+      if (!clientGone) res.end(JSON.stringify({ type: "done", response, searchUsed: false, translationUsed: metadata.translationUsed, recognizedUser, conversationId: convId, timestamp: new Date().toISOString() }) + "\n");
     } catch (error) {
-      console.error("Chat error:", error);
-      res.status(500).json({ 
-        error: error instanceof Error ? error.message : "Failed to process chat message" 
-      });
+      if (res.headersSent) { try { res.end(); } catch {} return; }
+      return sendError(res, error, "Failed to process chat message");
     }
   });
 
@@ -731,8 +461,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ translatedText });
 
     } catch (error) {
-      console.error("Translation error:", error);
-      res.status(500).json({ error: "Translation failed" });
+      sendError(res, toAIError(error), "Translation failed");
     }
   });
 
@@ -752,73 +481,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ analysis });
 
     } catch (error) {
-      console.error("Image analysis error:", error);
-      res.status(500).json({ error: "Image analysis failed" });
+      sendError(res, toAIError(error), "Image analysis failed");
     }
   });
 
   app.get("/api/conversations", async (req, res) => {
-    try {
-      const conversations = await storage.getUserConversations(req.sessionID);
-      const result = await Promise.all(conversations.map(async conversation => {
-        const messages = await storage.getConversationMessages(conversation.id);
-        return {
-          ...conversation,
-          messageCount: messages.length,
-          lastMessage: messages.at(-1)?.content || "",
-          lastActivityAt: messages.at(-1)?.createdAt || conversation.updatedAt,
-        };
-      }));
-      res.json(result.sort((a, b) => new Date(b.lastActivityAt!).getTime() - new Date(a.lastActivityAt!).getTime()));
-    } catch {
-      res.status(500).json({ error: "Could not load your conversations." });
-    }
+    try { res.json(await chats.listConversations(req.user!.id)); }
+    catch (error) { sendError(res, error, "Could not load your conversations."); }
   });
 
-  // Create conversation
   app.post("/api/conversations", async (req, res) => {
-    try {
-      const { title } = req.body;
-      
-      const conversation = await storage.createConversation({
-        title: title || "New Conversation"
-      }, req.sessionID);
-      
-      res.json(conversation);
-    } catch (error) {
-      console.error("Create conversation error:", error);
-      res.status(500).json({ error: "Failed to create conversation" });
-    }
+    try { res.status(201).json(await chats.createConversation(req.user!.id, req.body?.title)); }
+    catch (error) { sendError(res, error, "Failed to create conversation"); }
   });
 
-  // Get conversation messages
+  app.get("/api/conversations/:id", async (req, res) => {
+    try {
+      const conversation = await chats.getConversation(req.user!.id, req.params.id);
+      if (!conversation) return res.status(404).json({ error: "Conversation not found." });
+      res.json(conversation);
+    } catch (error) { sendError(res, error, "Failed to load conversation"); }
+  });
+
+  app.patch("/api/conversations/:id", async (req, res) => {
+    try {
+      const conversation = await chats.renameConversation(req.user!.id, req.params.id, req.body?.title);
+      if (!conversation) return res.status(404).json({ error: "Conversation not found." });
+      res.json(conversation);
+    } catch (error) { sendError(res, error, "Failed to rename conversation"); }
+  });
+
   app.get("/api/conversations/:id/messages", async (req, res) => {
     try {
-      const { id } = req.params;
-      const messages = await storage.getConversationMessages(id);
-      res.json(messages);
-    } catch (error) {
-      console.error("Get messages error:", error);
-      res.status(500).json({ error: "Failed to get messages" });
-    }
+      const conversation = await chats.getConversation(req.user!.id, req.params.id);
+      if (!conversation) return res.status(404).json({ error: "Conversation not found." });
+      res.json(await chats.getMessages(conversation.id));
+    } catch (error) { sendError(res, error, "Failed to get messages"); }
   });
 
-  // Delete conversation
   app.delete("/api/conversations/:id", async (req, res) => {
     try {
-      const { id } = req.params;
-      await storage.deleteConversation(id);
+      const deleted = await chats.deleteConversation(req.user!.id, req.params.id);
+      if (!deleted) return res.status(404).json({ error: "Conversation not found." });
       res.json({ success: true });
-    } catch (error) {
-      console.error("Delete conversation error:", error);
-      res.status(500).json({ error: "Failed to delete conversation" });
-    }
+    } catch (error) { sendError(res, error, "Failed to delete conversation"); }
   });
 
   // User settings endpoints
   app.get("/api/settings/:userId", async (req, res) => {
     try {
-      const { userId } = req.params;
+      const userId = req.user!.id; // settings belong to the signed-in account, not the URL
       let settings = await storage.getUserSettings(userId);
       
       if (!settings) {
@@ -842,7 +554,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put("/api/settings/:userId", async (req, res) => {
     try {
-      const { userId } = req.params;
+      const userId = req.user!.id; // settings belong to the signed-in account, not the URL
       const settingsData = insertUserSettingsSchema.parse(req.body);
       
       const settings = await storage.updateUserSettings(userId, settingsData);
@@ -881,9 +593,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.put("/api/background-images", async (req, res) => {
     try {
-      const { backgroundImageURL, userId } = req.body;
+      const { backgroundImageURL } = req.body;
+      const userId = req.user!.id;
       
-      if (!backgroundImageURL || !userId) {
+      if (!backgroundImageURL) {
         return res.status(400).json({ error: "backgroundImageURL and userId are required" });
       }
 

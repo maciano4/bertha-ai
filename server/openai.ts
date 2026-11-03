@@ -1,10 +1,14 @@
 import OpenAI from "openai";
 import { performNLPAnalysis, type NLPAnalysis } from "./nlp";
 
-// Using GPT-3.5-turbo for faster responses. GPT-4o only needed for images/complex tasks
-const openai = new OpenAI({ 
-  apiKey: process.env.OPENAI_API_KEY || process.env.OpenAI_API_KEY || process.env.OPENAI_KEY || "default_key"
-});
+// Keep every spelling of the key that earlier Replit setups used.
+export function openAIKey() {
+  return (process.env.OPENAI_API_KEY || process.env.OpenAI_API_KEY || process.env.OPENAI_KEY || "").trim();
+}
+export const CHAT_MODEL = (process.env.OPENAI_MODEL || "gpt-4o-mini").trim();
+const isReasoningModel = (model: string) => /^(o\d|gpt-5)/i.test(model);
+
+const openai = new OpenAI({ apiKey: openAIKey() || "missing-openai-key", timeout: 60_000, maxRetries: 1 });
 
 export interface ChatResponse {
   content: string;
@@ -14,149 +18,166 @@ export interface ChatResponse {
   nlpAnalysis?: NLPAnalysis;
 }
 
-// Function to get real-time information in Eastern Time
-function getRealTimeInfo(): string {
+// An error that is safe to show the user, with an HTTP status and a machine-readable code.
+export class AIError extends Error {
+  constructor(message: string, public status: number, public code: string) { super(message); }
+}
+
+export function toAIError(error: unknown): AIError {
+  if (error instanceof AIError) return error;
+  const e = error as any;
+  const status: number | undefined = e?.status;
+  const code: string = e?.code || e?.error?.code || e?.type || "";
+  if (!openAIKey()) return new AIError("Bertha's AI isn't set up yet: the OPENAI_API_KEY secret is missing. Add it in Replit Secrets and restart.", 503, "no_api_key");
+  if (status === 401) return new AIError("Bertha can't reach her AI because the OpenAI API key was rejected. Check the OPENAI_API_KEY secret in Replit and restart.", 503, "invalid_api_key");
+  if (status === 429 && /insufficient_quota/.test(code + " " + (e?.message || ""))) {
+    return new AIError("Bertha can't answer right now because the OpenAI account is out of credits. Add credits at platform.openai.com (Settings → Billing), then try again.", 503, "insufficient_quota");
+  }
+  if (status === 429) return new AIError("Bertha is getting too many requests right now. Please wait a few seconds and try again.", 429, "rate_limited");
+  if (status === 404 || code === "model_not_found") return new AIError(`The AI model "${CHAT_MODEL}" isn't available on this OpenAI account. Set OPENAI_MODEL to a model you have access to (for example gpt-4o-mini).`, 503, "model_not_found");
+  if (status === 400 && /context_length|maximum context/i.test(e?.message || "")) return new AIError("That conversation has grown too long for the AI. Please start a new chat.", 400, "context_too_long");
+  if (e?.name === "APIConnectionTimeoutError" || /timed? ?out/i.test(e?.message || "")) return new AIError("The AI took too long to answer. Please try again.", 504, "ai_timeout");
+  return new AIError(`Bertha's AI is unavailable right now${status ? ` (OpenAI error ${status}${code ? ` ${code}` : ""})` : ""}. Please try again in a moment.`, 503, "ai_unavailable");
+}
+
+export interface ChatContext {
+  language?: string;
+  timeZone?: string;
+  userName?: string | null;
+  recognizedUser?: string | null;
+  upcomingAppointments?: string[];
+  nlpAnalysis?: NLPAnalysis;
+}
+
+function nowInZone(timeZone: string) {
   const now = new Date();
-  // Use Eastern Time zone for Bertha
-  const timeString = now.toLocaleTimeString('en-US', { 
-    hour: 'numeric', 
-    minute: '2-digit', 
-    hour12: true,
-    timeZone: 'America/New_York'
-  });
-  const dateString = now.toLocaleDateString('en-US', { 
-    weekday: 'long', 
-    year: 'numeric', 
-    month: 'long', 
-    day: 'numeric',
-    timeZone: 'America/New_York'
-  });
-  
-  return `Current real-time information (Eastern Time):
-- Current time: ${timeString}
-- Current date: ${dateString}
-- Day of week: ${now.toLocaleDateString('en-US', { weekday: 'long', timeZone: 'America/New_York' })}
-- Month: ${now.toLocaleDateString('en-US', { month: 'long', timeZone: 'America/New_York' })}
-- Year: ${now.getFullYear()}`;
+  const date = now.toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone });
+  const time = now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true, timeZone, timeZoneName: "short" });
+  return { date, time };
+}
+
+export function buildSystemPrompt(ctx: ChatContext) {
+  const timeZone = ctx.timeZone || "America/New_York";
+  const language = ctx.language || "en";
+  const { date, time } = nowInZone(timeZone);
+  let prompt = `You are Bertha, a wise and loving 80-year-old grandmother from Cameroon and a genuinely useful personal assistant. You speak with warmth, wisdom and gentle authority, with the rhythms of West African English and an occasional French word.
+
+PERSONALITY
+- Warm and motherly; use a term of endearment ("my dear", "child") now and then, not in every sentence.
+- Patient and nurturing. Share a proverb or short story when it helps, never instead of a real answer.
+- Never use emojis.
+
+HONESTY (most important)
+- Accuracy matters more than sounding confident. Only state facts you are sure of.
+- If you don't know, or you are unsure, say so plainly ("I'm not sure, dear") and suggest how to find out. Never make up facts, numbers, names, quotes, prices, laws, medical doses, links or sources.
+- You have NO internet access and no live data. You cannot see today's news, sports scores, stock prices, store hours or live weather. If asked, say you can't check that live and suggest where to look. Your general knowledge has a cutoff date and may be out of date.
+- For medical, legal or money questions, give careful general information and recommend a qualified professional for decisions.
+- Do not claim to have done things you cannot do (sending messages, making calls, booking on websites). The app itself saves appointments and reminders; you only confirm those when the app tells you it did.
+- If a request is ambiguous, ask one short clarifying question.
+
+CURRENT DATE AND TIME (use this; never guess)
+- Today is ${date}. The time now is ${time} (user's time zone: ${timeZone}).
+- Work out "tomorrow", "next Friday", ages and countdowns from this date.
+
+WRITING TASKS (texts, emails, social posts, cover letters, letters, cards, speeches)
+- Write the piece in the USER'S voice, ready to send: natural modern English (or the language requested), no grandmother phrases, no "my dear", no emojis unless the user asks for them.
+- Put the finished piece between two lines that contain only three dashes, like this:
+---
+(the draft goes here)
+---
+- Before the first line, write at most one short friendly sentence. After the last line, you may offer one short suggestion. Do not explain the draft at length.
+- Text messages: short and casual. Emails: include a "Subject:" line, then the body and a sign-off. Social posts: fit the platform. Cover letters: about 250-400 words, specific to the role, using only details the user gave; put [placeholders] for anything you don't know (name, company, experience) rather than inventing it.
+- If key details are missing, write a good draft with [placeholders] and ask for the missing details in one sentence after it.
+
+RESPONSE LENGTH
+- Greetings: very short (5-8 words).
+- Simple questions: answer directly in 1-3 sentences, answer first.
+- Stories, explanations, advice: thorough, 3-6 sentences or a short list.
+- Replies may be read aloud, so prefer plain sentences; use short lists only when they really help.
+
+CONVERSATION
+- This is one continuous conversation. Remember what was said earlier and understand short follow-ups ("and tomorrow?", "why?", "make it shorter").
+- Don't greet again or reintroduce yourself after the first message.
+- Appointments and reminders: the app saves these when the user says things like "set a dentist appointment next Tuesday at 3pm" or "remind me to call Mom at 5pm". If the user asks you to create one and you are seeing this message, the app did not save it; tell them to phrase it with the day and time like those examples, and never pretend it was saved.
+
+Response language: ${language === "en" ? "English" : `respond in the language with code "${language}"`}.`;
+
+  if (ctx.userName) prompt += `\n\nThe user's name is ${ctx.userName}. Use it now and then, naturally.`;
+  if (ctx.recognizedUser) prompt += `\n\nThe person speaking appears to be ${ctx.recognizedUser} (recognized from their voice profile).`;
+  if (ctx.upcomingAppointments) {
+    prompt += ctx.upcomingAppointments.length
+      ? `\n\nThe user's saved upcoming appointments and reminders (from the app; this is the complete list):\n${ctx.upcomingAppointments.map(item => `- ${item}`).join("\n")}`
+      : `\n\nThe user has no saved upcoming appointments or reminders in the app.`;
+  }
+  if (ctx.nlpAnalysis) {
+    const n = ctx.nlpAnalysis;
+    prompt += `\n\nContext analysis: intent ${n.intent}; topic ${n.context.currentTopic}; sentiment ${n.sentiment.sentiment}; tone ${n.context.conversationTone}; urgency ${n.context.urgency}.`;
+  }
+  return prompt;
+}
+
+type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+
+function buildMessages(userInput: string, history: Array<{ role: string; content: string }>, ctx: ChatContext): ChatMessage[] {
+  return [
+    { role: "system", content: buildSystemPrompt(ctx) },
+    ...history.filter(msg => msg.role === "user" || msg.role === "assistant").slice(-20)
+      .map(msg => ({ role: msg.role as "user" | "assistant", content: msg.content })),
+    { role: "user", content: userInput },
+  ];
+}
+
+function requestOptions() {
+  return isReasoningModel(CHAT_MODEL)
+    ? { model: CHAT_MODEL, max_completion_tokens: 4000 }
+    : { model: CHAT_MODEL, max_completion_tokens: 1200, temperature: 0.6 };
+}
+
+async function nlpFor(userInput: string, history: Array<{ role: string; content: string }>) {
+  // NLP analysis costs several extra model calls per turn, so it stays off unless BERTHA_NLP=1.
+  return process.env.BERTHA_NLP === "1" ? performNLPAnalysis(userInput, history) : undefined;
+}
+
+// Starts a streamed answer. Any OpenAI error (bad key, no credits...) is thrown as an AIError
+// BEFORE the first token, so the route can still answer with a clean JSON error.
+export async function streamChatResponse(userInput: string, history: Array<{ role: string; content: string }>, ctx: ChatContext): Promise<AsyncIterable<string>> {
+  if (!openAIKey()) throw toAIError(new Error("missing key"));
+  const nlpAnalysis = ctx.nlpAnalysis ?? await nlpFor(userInput, history).catch(() => undefined);
+  let stream: AsyncIterable<any>;
+  try {
+    stream = await openai.chat.completions.create({ ...requestOptions(), messages: buildMessages(userInput, history, { ...ctx, nlpAnalysis }), stream: true });
+  } catch (error) {
+    console.error("OpenAI API error:", (error as any)?.status, (error as any)?.code || (error as any)?.message);
+    throw toAIError(error);
+  }
+  return (async function* () {
+    try {
+      for await (const chunk of stream) {
+        const text = chunk.choices?.[0]?.delta?.content;
+        if (text) yield text as string;
+      }
+    } catch (error) {
+      console.error("OpenAI stream error:", error);
+      throw toAIError(error);
+    }
+  })();
 }
 
 export async function generateChatResponse(
   userInput: string,
   conversationHistory: Array<{ role: string; content: string }>,
-  language: string = "en",
-  searchResults?: string,
-  includeNLP: boolean = true,
-  recognizedUser?: string
+  ctxOrLanguage: ChatContext | string = {},
 ): Promise<ChatResponse> {
+  const ctx: ChatContext = typeof ctxOrLanguage === "string" ? { language: ctxOrLanguage } : ctxOrLanguage;
+  if (!openAIKey()) throw toAIError(new Error("missing key"));
   try {
-    // The NLP analysis makes 6-7 separate gpt-4o calls before Bertha even starts to answer. That made
-    // every turn take many seconds, which breaks a spoken back-and-forth, and a one-word reply could be
-    // mis-detected as another language and flip her into translating. It is now off unless BERTHA_NLP=1.
-    let nlpAnalysis: NLPAnalysis | undefined;
-    if (includeNLP && process.env.BERTHA_NLP === "1") {
-      nlpAnalysis = await performNLPAnalysis(userInput, conversationHistory);
-    }
-    
-    // Add real-time information for time-related queries
-    let realTimeInfo = "";
-    if (userInput.toLowerCase().includes('time') || 
-        userInput.toLowerCase().includes('date') || 
-        userInput.toLowerCase().includes('today') ||
-        userInput.toLowerCase().includes('now') ||
-        userInput.toLowerCase().includes('current')) {
-      realTimeInfo = getRealTimeInfo();
-    }
-
-    let systemPrompt = `You are Bertha, a wise and loving 80-year-old grandmother from Cameroon. You have lived a full life and speak with the warmth, wisdom, and gentle authority that comes with age and experience. Your voice carries the rhythms and expressions of West African English, with occasional French words when appropriate.
-    
-    Personality traits:
-    - Speak with warmth and motherly love, as if addressing your own grandchildren
-    - Share wisdom through gentle stories and life lessons
-    - Use caring terms of endearment occasionally ("my dear", "child", "little one")
-    - Be patient and nurturing, never harsh or impatient
-    - Draw from the rich oral tradition of storytelling
-    - Show interest in the person's wellbeing and growth
-    - Speak with the measured pace and thoughtfulness of age
-    
-    Cultural background:
-    - From Cameroon, bilingual in English and French
-    - Rich in African proverbs and wisdom
-    - Values community, respect for elders, and family bonds
-    - Has experienced many seasons of life and can relate to various struggles
-    
-    RESPONSE LENGTH RULES:
-    - For GREETINGS (hi, hello, how are you): Keep EXTREMELY SHORT (maximum 5-8 words). Examples: "Hello dear", "I'm well, thanks", "Good morning"
-    - For STORIES/EXPLANATIONS/ADVICE (tell me a story, explain theory, give advice): Be DETAILED and THOROUGH like a wise grandmother sharing knowledge. Use 3-4 sentences minimum.
-    - For TIME/DATE questions: Keep short like "It's 3 PM now" or "It's Sunday, dear"
-    - NEVER use emojis in ANY response.
-    
-    CONVERSATION RULES:
-    - This is one continuous, spoken conversation. The earlier messages are what you and the user already said, so remember them.
-    - Understand short follow-ups ("and tomorrow?", "why?", "tell me more", "yes", "what about him?") from what was just discussed.
-    - Do not greet again or reintroduce yourself after the first message. Pick up where you left off.
-    - If a reply would be long, finish your last sentence cleanly and invite the user to ask for more.
-
-    Response language: ${language === "en" ? "English" : `Translate your response to language code: ${language}`}`;
-
-    // Add voice recognition context
-    if (recognizedUser) {
-      systemPrompt += `\n\nIMPORTANT: The user speaking to you is ${recognizedUser}. Address them by name and personalize your responses. Show that you remember them and are happy to chat with them again.`;
-    }
-
-    // Enhance system prompt with NLP insights
-    if (nlpAnalysis) {
-      systemPrompt += `\n\nContext Analysis:
-      - User Intent: ${nlpAnalysis.intent}
-      - Conversation Topic: ${nlpAnalysis.context.currentTopic}
-      - User Sentiment: ${nlpAnalysis.sentiment.sentiment} (${nlpAnalysis.sentiment.confidence.toFixed(2)} confidence)
-      - Conversation Tone: ${nlpAnalysis.context.conversationTone}
-      - Urgency Level: ${nlpAnalysis.context.urgency}
-      - Key Topics: ${nlpAnalysis.keywords.join(", ")}
-      
-      Respond appropriately based on this analysis. ${nlpAnalysis.requiresAction ? "This message requires action or assistance." : ""}
-      ${nlpAnalysis.sentiment.emotions.length > 0 ? `User emotions detected: ${nlpAnalysis.sentiment.emotions.join(", ")}` : ""}`;
-    }
-
-    if (searchResults) {
-      systemPrompt += `\n\nWeb search results for context:\n${searchResults}`;
-    }
-    
-    if (realTimeInfo) {
-      systemPrompt += `\n\nReal-time information:\n${realTimeInfo}`;
-    }
-
-    const messages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
-      { role: "system", content: systemPrompt },
-      ...conversationHistory.filter(msg => msg.role === "user" || msg.role === "assistant").slice(-20).map(msg => ({
-        role: msg.role as "user" | "assistant",
-        content: msg.content
-      })),
-      { role: "user", content: userInput }
-    ];
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
-      messages,
-      max_completion_tokens: 300,
-      temperature: 0.7,
-      top_p: 0.9
-    });
-
-    const content = response.choices[0].message.content || "I apologize, but I couldn't generate a response.";
-
-    return {
-      content,
-      searchUsed: !!searchResults,
-      translationUsed: language !== "en",
-      nlpAnalysis
-    };
+    const nlpAnalysis = ctx.nlpAnalysis ?? await nlpFor(userInput, conversationHistory).catch(() => undefined);
+    const response = await openai.chat.completions.create({ ...requestOptions(), messages: buildMessages(userInput, conversationHistory, { ...ctx, nlpAnalysis }) });
+    const content = response.choices[0]?.message?.content?.trim() || "I'm sorry, dear, I couldn't put an answer together. Please ask me again.";
+    return { content, searchUsed: false, translationUsed: (ctx.language || "en") !== "en", nlpAnalysis };
   } catch (error) {
-    console.error("OpenAI API error:", error);
-    // Pass the provider's status and code (e.g. 429 insufficient_quota) on so the app can say why.
-    const status = (error as any)?.status;
-    const code = (error as any)?.code || (error as any)?.error?.code || (error as any)?.type;
-    const detail = [status, code].filter(Boolean).join(" ");
-    throw new Error(`AI service unavailable (OpenAI${detail ? ` ${detail}` : ""}). ${status === 401 ? "Check the OPENAI_API_KEY secret." : status === 429 && code === "insufficient_quota" ? "The OpenAI account is out of credits." : "Please try again later."}`);
+    console.error("OpenAI API error:", (error as any)?.status, (error as any)?.code || (error as any)?.message);
+    throw toAIError(error);
   }
 }
 
@@ -165,7 +186,7 @@ export async function translateText(text: string, targetLanguage: string): Promi
     if (targetLanguage === "en") return text;
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: (process.env.OPENAI_VISION_MODEL || CHAT_MODEL).trim(),
       messages: [
         {
           role: "system",
@@ -189,7 +210,7 @@ export async function translateText(text: string, targetLanguage: string): Promi
 export async function analyzeImage(base64Image: string): Promise<string> {
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: (process.env.OPENAI_VISION_MODEL || CHAT_MODEL).trim(),
       messages: [
         {
           role: "user",
@@ -212,7 +233,7 @@ export async function analyzeImage(base64Image: string): Promise<string> {
 
     return response.choices[0].message.content || "I couldn't analyze this image.";
   } catch (error) {
-    console.error("Image analysis error:", error);
-    throw new Error("Failed to analyze image");
+    console.error("Image analysis error:", (error as any)?.status, (error as any)?.message);
+    throw toAIError(error);
   }
 }

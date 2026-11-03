@@ -1,6 +1,51 @@
 import { Message } from "@/hooks/useChat";
 import { cn } from "@/lib/utils";
 import { useState, useEffect } from "react";
+import { Check, Copy } from "lucide-react";
+import { copyText, copyToClipboard, splitDraft } from "@/lib/drafts";
+
+function CopyButton({ text, label = "Copy", testId }: { text: string; label?: string; testId: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={async (event) => {
+        event.stopPropagation();
+        if (await copyToClipboard(text)) {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        }
+      }}
+      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      aria-label={copied ? "Copied" : label}
+      data-testid={testId}
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? "Copied" : label}
+    </button>
+  );
+}
+
+// Shows Bertha's reply; a finished draft (between --- lines) gets its own box.
+function AssistantContent({ content, canCopy }: { content: string; canCopy: boolean }) {
+  const { before, draft, after } = splitDraft(content);
+  return (
+    <>
+      {before && <p className="text-foreground whitespace-pre-wrap" data-testid="text-content">{before}</p>}
+      {draft && (
+        <div className="mt-2 rounded-md border border-border bg-background/70 p-3" data-testid="draft-block">
+          <p className="text-foreground whitespace-pre-wrap">{draft}</p>
+        </div>
+      )}
+      {after && <p className="mt-2 text-foreground whitespace-pre-wrap">{after}</p>}
+      {canCopy && content.trim() && (
+        <div className="mt-2 flex justify-end">
+          <CopyButton text={copyText(content)} label={draft ? "Copy draft" : "Copy"} testId="button-copy" />
+        </div>
+      )}
+    </>
+  );
+}
 
 interface MessageBubbleProps {
   message: Message;
@@ -69,9 +114,7 @@ export default function MessageBubble({ message, showAvatar }: MessageBubbleProp
                 </span>
               )}
             </div>
-            <p className="text-foreground whitespace-pre-wrap" data-testid="text-content">
-              {message.content}
-            </p>
+            <AssistantContent content={message.content} canCopy={message.id !== "welcome"} />
             {message.metadata?.searchUsed && (
               <div className="text-xs text-muted-foreground border-l-2 border-accent pl-3 mt-3">
                 <p className="font-medium mb-1">💡 Enhanced with Web Search</p>
@@ -80,10 +123,12 @@ export default function MessageBubble({ message, showAvatar }: MessageBubbleProp
             )}
           </div>
         </div>
-      ) : (
+      ) : isUser ? (
         <p className="text-foreground whitespace-pre-wrap" data-testid="text-content">
           {message.content}
         </p>
+      ) : (
+        <AssistantContent content={message.content} canCopy={message.id !== "welcome"} />
       )}
     </div>
   );

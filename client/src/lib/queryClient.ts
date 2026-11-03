@@ -1,6 +1,12 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 
+// Lets the sign-in gate notice an expired session from any request.
+export function notifyIfUnauthorized(res: Response) {
+  if (res.status === 401 && !res.url.includes("/api/auth/")) window.dispatchEvent(new Event("bertha-unauthorized"));
+}
+
 async function throwIfResNotOk(res: Response) {
+  notifyIfUnauthorized(res);
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
     throw new Error(`${res.status}: ${text}`);

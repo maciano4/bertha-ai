@@ -2,11 +2,42 @@
 
 ## Overview
 
-Bertha AI is an intelligent conversational assistant application built with a modern full-stack architecture. The system combines real-time chat capabilities with advanced features including voice interaction, camera integration, web search, multi-language translation, and file upload functionality. The application provides an interactive dashboard-style interface where users can communicate with an AI assistant through multiple input modalities.
+Bertha AI is an intelligent conversational assistant application built with a modern full-stack architecture. The system combines real-time chat capabilities with advanced features including voice interaction, camera integration, multi-language translation, and file upload functionality. The application provides an interactive dashboard-style interface where users can communicate with an AI assistant through multiple input modalities.
 
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.
+
+## Stage 1 platform upgrade (branch `stage1-platform`)
+
+### What's new
+- **Accounts.** Email and password sign-up and login (bcrypt). Sessions are stored in Postgres (`bertha_sessions`) and the cookie is httpOnly. Every chat and appointment belongs to the signed-in user.
+- **Permanent history.** Conversations and messages live in Postgres (`bertha_users`, `bertha_conversations`, `bertha_messages`). The chat page has a left sidebar of past chats with **New chat** and delete.
+- **Accurate replies.**
+  - Uses `OPENAI_MODEL` (default `gpt-4o-mini`).
+  - The prompt includes the current date, time and time zone, plus about 20 messages of context and honesty rules (no made-up facts, no pretend web search).
+  - Replies stream in, and errors are explained clearly.
+- **Writing tasks.** Starter buttons for a text, an email, a post and a cover letter. Drafts get a Copy button. Bertha speaks only the short intro, not the whole draft.
+- **Reminders and appointments typed or spoken in chat** are saved as real appointment rows.
+- **Code changes.**
+  - Server: `server/auth.ts`, `server/chatStore.ts`, `server/platformTables.ts` and `server/openai.ts`. The `/api/chat` flow is in `server/routes.ts`.
+  - Client: `client/src/hooks/useAuth.tsx`, `client/src/pages/auth.tsx`, `client/src/components/chat/ConversationSidebar.tsx` and `client/src/lib/drafts.ts`.
+
+### Secrets (Tools → Secrets)
+- `DATABASE_URL`: Postgres. It's set automatically when the Replit database is added.
+- `SESSION_SECRET`: **add this.** Any long random string keeps people signed in across restarts.
+- `OPENAI_API_KEY`: your OpenAI key. `OpenAI_API_KEY` and `OPENAI_KEY` also work. The account needs credits.
+- `OPENAI_MODEL` (optional): for example `gpt-4o`. The default is `gpt-4o-mini`.
+
+### Deploying this branch on Replit
+1. Get the code. Either use the **Git** pane to switch to or pull the `stage1-platform` branch, or run this in the Shell:
+   `git fetch origin && git checkout stage1-platform && git pull`
+2. Run `npm install`.
+3. Run `npm run db:push`. This step is optional: the server creates its tables on start. If you run it, check the list before confirming, because it also offers older unused tables from `shared/schema.ts`.
+4. Add the `SESSION_SECRET` secret, and make sure `OPENAI_API_KEY` is set.
+5. Press **Run** (or redeploy), open the app and choose **Create an account**.
+
+Note: chats from before this upgrade were held only in memory, so they don't carry over.
 
 ## System Architecture
 
@@ -22,7 +53,7 @@ The frontend is built using React with TypeScript, leveraging Vite for developme
 - Responsive design with mobile-first approach
 
 ### Backend Architecture
-The server is implemented using Express.js with TypeScript, following a RESTful API design pattern. The application uses an in-memory storage system as the default implementation with interfaces designed for easy migration to persistent database solutions.
+The server is implemented using Express.js with TypeScript, following a RESTful API design pattern. Users, sessions, conversations, messages and appointments are stored in Postgres (see "Stage 1 platform upgrade" above); voice profiles and some settings are still kept in memory.
 
 **API Structure:**
 - `/api/chat` - Main conversation endpoint handling message processing, web search, and AI response generation

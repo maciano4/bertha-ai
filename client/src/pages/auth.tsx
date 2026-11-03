@@ -1,0 +1,79 @@
+import { useState, type FormEvent } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useAuth } from "@/hooks/useAuth";
+
+export default function AuthPage({ initialMode = "login" }: { initialMode?: "login" | "signup" }) {
+  const { login, signup } = useAuth();
+  const [mode, setMode] = useState<"login" | "signup">(initialMode);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const isSignup = mode === "signup";
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setError(null);
+    if (isSignup && password.length < 8) return setError("Your password needs at least 8 characters.");
+    setBusy(true);
+    try {
+      if (isSignup) await signup(email.trim(), password, displayName.trim());
+      else await login(email.trim(), password);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const switchMode = () => { setMode(isSignup ? "login" : "signup"); setError(null); };
+
+  return (
+    <main className="chat-background min-h-screen flex items-center justify-center p-4">
+      <div className="w-full max-w-sm rounded-2xl border border-border bg-background/95 p-6 shadow-xl">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <img
+            src="https://images.unsplash.com/photo-1677442136019-21780ecad995?q=80&w=150&h=150&fit=crop"
+            alt="Bertha AI"
+            className="mb-3 h-16 w-16 rounded-full border-2 border-primary object-cover shadow"
+          />
+          <h1 className="text-2xl font-bold text-foreground">{isSignup ? "Create your Bertha account" : "Welcome back"}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {isSignup ? "Your chats and appointments are saved to your account and follow you to any device." : "Log in to see your chats and appointments."}
+          </p>
+        </div>
+        <form onSubmit={submit} className="space-y-4" noValidate>
+          {isSignup && (
+            <div className="space-y-1.5">
+              <Label htmlFor="displayName">Your first name (optional)</Label>
+              <Input id="displayName" autoComplete="given-name" value={displayName} onChange={e => setDisplayName(e.target.value)} maxLength={80} data-testid="input-name" />
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} data-testid="input-email" />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="password">Password</Label>
+            <Input id="password" type="password" autoComplete={isSignup ? "new-password" : "current-password"} required minLength={isSignup ? 8 : undefined}
+              value={password} onChange={e => setPassword(e.target.value)} data-testid="input-password" />
+            {isSignup && <p className="text-xs text-muted-foreground">At least 8 characters.</p>}
+          </div>
+          {error && <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive" data-testid="text-auth-error">{error}</p>}
+          <Button type="submit" className="w-full" disabled={busy || !email || !password} data-testid="button-auth-submit">
+            {busy ? "Please wait..." : isSignup ? "Create account" : "Log in"}
+          </Button>
+        </form>
+        <p className="mt-5 text-center text-sm text-muted-foreground">
+          {isSignup ? "Already have an account?" : "New to Bertha?"}{" "}
+          <button type="button" onClick={switchMode} className="font-medium text-primary underline-offset-4 hover:underline" data-testid="button-auth-switch">
+            {isSignup ? "Log in" : "Create an account"}
+          </button>
+        </p>
+      </div>
+    </main>
+  );
+}

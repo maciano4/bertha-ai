@@ -154,16 +154,6 @@ export default function SettingsPanel({ onBackgroundChange }: SettingsPanelProps
             />
           </div>
 
-          {/* Web Search Toggle */}
-          <div className="flex items-center justify-between">
-            <Label className="text-sm text-muted-foreground">Web Search</Label>
-            <Switch
-              checked={settings.searchEnabled}
-              onCheckedChange={(checked) => updateSettings({ searchEnabled: checked })}
-              data-testid="switch-search"
-            />
-          </div>
-
           {/* Background Presets */}
           <div className="space-y-2">
             <Label className="text-sm text-muted-foreground">Background</Label>

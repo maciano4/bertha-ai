@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, jsonb, boolean, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -193,6 +193,43 @@ export const notifications = pgTable("notifications", {
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow(),
 });
+
+
+// ---------------------------------------------------------------------------
+// Stage 1 platform tables (accounts + permanent chat history).
+// These are created automatically at startup (server/platformTables.ts) and are
+// the only tables `npm run db:push` manages (see tablesFilter in drizzle.config.ts),
+// so a push can never touch the existing bertha_sessions / bertha_appointments data.
+// Keep these definitions and the startup SQL identical.
+// ---------------------------------------------------------------------------
+export const berthaUsers = pgTable("bertha_users", {
+  id: text("id").primaryKey(),
+  email: text("email").notNull().unique("bertha_users_email_unique"),
+  passwordHash: text("password_hash").notNull(),
+  displayName: text("display_name"),
+  timeZone: text("time_zone"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const berthaConversations = pgTable("bertha_conversations", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => berthaUsers.id, { onDelete: "cascade" }),
+  title: text("title").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [index("bertha_conversations_user_updated").on(table.userId, table.updatedAt)]);
+
+export const berthaMessages = pgTable("bertha_messages", {
+  id: text("id").primaryKey(),
+  conversationId: text("conversation_id").notNull().references(() => berthaConversations.id, { onDelete: "cascade" }),
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [index("bertha_messages_conversation_created").on(table.conversationId, table.createdAt)]);
+
+export type BerthaUser = typeof berthaUsers.$inferSelect;
+export type PublicUser = { id: string; email: string; displayName: string | null; timeZone: string | null };
 
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,

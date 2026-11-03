@@ -4,7 +4,7 @@ import { z } from "zod";
 import { pool } from "./db";
 import { appointmentInput, type Appointment, type AppointmentInput } from "@shared/appointments";
 import { describeTime, validTimeZone, zonedDateTime } from "./appointmentDates";
-import { parseAppointmentCommand } from "./appointmentCommands";
+import { parseAppointmentCommand, parseReminderCommand } from "./appointmentCommands";
 
 // Additive schema setup: never alters or replaces existing calendar/reminder data.
 export async function ensureAppointmentsTable() {
@@ -64,26 +64,26 @@ async function cancelAppointment(ownerId: string, id: string) {
 
 export function registerAppointmentRoutes(app: Express) {
   app.get("/api/appointments", async (req, res) => {
-    try { res.json(await listAppointments(req.sessionID)); }
+    try { res.json(await listAppointments(req.user!.id)); }
     catch (error) { console.error("Load appointments:", error); res.status(503).json({ error: "Appointments could not be loaded. Please try again." }); }
   });
   app.post("/api/appointments", async (req, res) => {
-    try { res.status(201).json(await saveAppointment(req.sessionID, req.body)); }
+    try { res.status(201).json(await saveAppointment(req.user!.id, req.body)); }
     catch (error) { appointmentError(res, error); }
   });
   app.patch("/api/appointments/:id", async (req, res) => {
     try {
-      const existing = (await listAppointments(req.sessionID)).find(item => item.id === req.params.id && item.status === "scheduled");
+      const existing = (await listAppointments(req.user!.id)).find(item => item.id === req.params.id && item.status === "scheduled");
       if (!existing) return res.status(404).json({ error: "Appointment not found." });
       const changes = appointmentInput.partial().parse(req.body);
-      const updated = await saveAppointment(req.sessionID, { ...existing, ...changes }, existing.id);
+      const updated = await saveAppointment(req.user!.id, { ...existing, ...changes }, existing.id);
       if (!updated) return res.status(404).json({ error: "Appointment not found." });
       res.json(updated);
     } catch (error) { appointmentError(res, error); }
   });
   app.delete("/api/appointments/:id", async (req, res) => {
     try {
-      const result = await cancelAppointment(req.sessionID, req.params.id);
+      const result = await cancelAppointment(req.user!.id, req.params.id);
       if (!result) return res.status(404).json({ error: "Appointment not found." });
       res.json({ ...result, status: "cancelled" });
     } catch (error) { appointmentError(res, error); }
@@ -94,7 +94,7 @@ export function registerAppointmentRoutes(app: Express) {
       const result = await pool.query(`SELECT ${columns} FROM bertha_appointments
         WHERE owner_id=$1 AND status='scheduled' AND reminder_delivered_at IS NULL
         AND starts_at - reminder_minutes * interval '1 minute' <= now() AND end_at > now()
-        ORDER BY starts_at`, [req.sessionID]);
+        ORDER BY starts_at`, [req.user!.id]);
       res.json(result.rows.map(item => ({
         id: item.id,
         content: `Appointment reminder: ${item.title} is ${new Date(item.startsAt) <= new Date() ? "starting now or in progress" : "coming up"} — ${describeTime(item.startsAt, item.timeZone)}${item.location ? ` at ${item.location}` : ""}.`,
@@ -105,7 +105,7 @@ export function registerAppointmentRoutes(app: Express) {
     try {
       const result = await pool.query(`UPDATE bertha_appointments SET reminder_delivered_at=now()
         WHERE id=$1 AND owner_id=$2 AND status='scheduled' AND reminder_delivered_at IS NULL RETURNING id`,
-      [req.params.id, req.sessionID]);
+      [req.params.id, req.user!.id]);
       res.json({ acknowledged: result.rowCount === 1 });
     } catch (error) { appointmentError(res, error); }
   });
@@ -119,7 +119,8 @@ function appointmentError(res: import("express").Response, error: unknown) {
 }
 
 export async function handleAppointmentChat(message: string, ownerId: string, requestedZone: unknown): Promise<string | null> {
-  // Leave the normal assistant and its existing reminder/planning paths untouched.
+  // Writing requests ("write an email to move my meeting") go to the assistant, not the calendar.
+  if (WRITING_REQUEST.test(message)) return null;
   if (!/\b(appointment|appointments|schedule|reschedule|book|booking|calendar|meeting|meetings|date|dates|dentist|doctor|cancel|move|change|edit)\b/i.test(message)) return null;
   const timeZone = validTimeZone(requestedZone);
   const all = await listAppointments(ownerId);
@@ -164,4 +165,26 @@ export async function handleAppointmentChat(message: string, ownerId: string, re
     if (error instanceof Error && /^Please choose|^The end/.test(error.message)) return `${error.message} I haven't saved the appointment.`;
     throw error;
   }
+}
+
+const WRITING_REQUEST = /^\s*(?:(?:hey\s+|hi\s+)?bertha[,\s]+)?(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:help\s+me\s+)?(?:write|draft|compose|rewrite|reword|proofread|polish|translate)\b/i;
+
+// Simple reminders become real rows in the user's appointment list (15-minute slot,
+// reminder at the start time), so they show in Appointments and pop up in chat.
+export async function handleReminderChat(message: string, ownerId: string, requestedZone: unknown): Promise<string | null> {
+  if (WRITING_REQUEST.test(message)) return null;
+  const timeZone = validTimeZone(requestedZone);
+  const command = parseReminderCommand(message, timeZone);
+  if (command.action === "none") return null;
+  if (command.action === "clarify") return command.question;
+  const startsAt = zonedDateTime(command.localStart, timeZone);
+  if (!startsAt) return "That time doesn't exist in your time zone. Please give me another time. I haven't saved anything yet.";
+  const saved = await saveAppointment(ownerId, {
+    title: command.title.slice(0, 120),
+    startsAt: startsAt.toISOString(),
+    endAt: new Date(startsAt.getTime() + 15 * 60000).toISOString(),
+    timeZone, location: null, notes: "Reminder created in chat", reminderMinutes: 0,
+  });
+  if (!saved) return "I couldn't save that reminder. Please try again.";
+  return `Reminder saved: ${saved.title} — ${describeTime(saved.startsAt, saved.timeZone)}. I'll remind you in this chat at that time while Bertha is open, and you can see it under Appointments.`;
 }

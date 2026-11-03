@@ -5,11 +5,10 @@ import { useWakeWordSpeech } from "@/hooks/useWakeWordSpeech";
 import MessageBubble from "./MessageBubble";
 import ChatInput from "./ChatInput";
 import { NLPInsights } from "@/components/nlp/NLPInsights";
-import { ReminderNotifications } from "../reminders/ReminderNotifications";
-import { DailyPlanner } from "../planning/DailyPlanner";
+import { spokenText } from "@/lib/drafts";
 import type { MessageMetadata } from "@shared/schema";
 import { Button } from "@/components/ui/button";
-import { Ear, EarOff, Mic, MicOff, ExternalLink } from "lucide-react";
+import { Ear, EarOff, Mic, MicOff, ExternalLink, MessageSquareText, Mail, Megaphone, FileText } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
 
@@ -17,6 +16,13 @@ interface ChatInterfaceProps {
   conversationId: string | null;
   onConversationStart: (id: string) => void;
 }
+
+const WRITING_STARTERS = [
+  { label: "Write a text", icon: MessageSquareText, text: "Write a short text message to [who] about " },
+  { label: "Write an email", icon: Mail, text: "Write an email to [who] about " },
+  { label: "Write a post", icon: Megaphone, text: "Write a social media post about " },
+  { label: "Cover letter", icon: FileText, text: "Write a cover letter for the [job title] job at [company]. A bit about me: " },
+];
 
 export default function ChatInterface({ conversationId, onConversationStart }: ChatInterfaceProps) {
   const [settings, setSettings] = useState({
@@ -27,7 +33,8 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
     wakeWordEnabled: true
   });
 
-  const { messages, latestReply, isLoading, sendMessage, addAssistantMessage, historyError, messagesEndRef, scrollToBottom } = useChat(conversationId);
+  const { messages, latestReply, isLoading, isStreaming, sendMessage, addAssistantMessage, historyError, messagesEndRef, scrollToBottom } = useChat(conversationId);
+  const [prefill, setPrefill] = useState<{ text: string; nonce: number } | undefined>(undefined);
   const { speak, stopSpeaking, isSpeaking, setWakeWordCallbacks, initializeSpeechSynthesis, initializeAudioContext } = useSpeech();
   const {
     isWakeWordListening,
@@ -131,14 +138,15 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
 
     if (lastAssistantMessage) {
       // Store last message for repeat functionality
-      (window as any).lastBerthaSpokenMessage = lastAssistantMessage.content;
+      const spoken = spokenText(lastAssistantMessage.content);
+      (window as any).lastBerthaSpokenMessage = spoken;
       
       // Prevent duplicate speech synthesis for the same message
       const messageKey = `${lastAssistantMessage.id}:${lastAssistantMessage.content}`;
       if (lastSpokenMessageRef.current !== messageKey) {
         lastSpokenMessageRef.current = messageKey;
         console.log('🎙️ Speaking new Bertha reply:', lastAssistantMessage.content.slice(0, 50) + '...');
-        if (settings.speechEnabled) speak(lastAssistantMessage.content);
+        if (settings.speechEnabled) speak(spoken);
       }
     }
     
@@ -219,16 +227,10 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
 
   return (
     <div className="flex-1 min-w-0 flex flex-col" onClick={handleUserInteraction}>
-      {/* Reminder Notifications */}
-      <ReminderNotifications />
-      
       {/* Chat Messages Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4" data-testid="chat-area">
-        {historyError && <p role="alert" className="text-sm text-destructive">This conversation could not be loaded. It may belong to another browser session or have expired after a server restart.</p>}
+        {historyError && <p role="alert" className="text-sm text-destructive">This conversation could not be loaded. It may have been deleted. Pick another chat on the left or start a new one.</p>}
         {appointmentReminders.error && <p role="status" className="text-sm text-destructive">Appointment reminders are temporarily unavailable. Bertha will retry automatically.</p>}
-        {/* Daily Planner */}
-        <DailyPlanner />
-        
         {/* Welcome Message */}
         {messages.length === 0 && (
           <MessageBubble
@@ -263,7 +265,7 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
         ))}
 
         {/* Typing Indicator */}
-        {isLoading && (
+        {isLoading && !isStreaming && (
           <div className="message-bubble ai-message p-4 rounded-lg shadow-sm">
             <div className="flex items-start gap-3">
               <img 
@@ -285,7 +287,18 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
 
       {/* Input Area */}
       <div className="blur-backdrop border-t border-border p-4">
+        {/* Writing helpers: fill the box with a starter the user finishes */}
+        <div className="flex flex-wrap gap-2 mb-3 max-w-4xl mx-auto" data-testid="writing-chips">
+          {WRITING_STARTERS.map(({ label, icon: Icon, text }) => (
+            <Button key={label} variant="outline" size="sm" className="rounded-full"
+              onClick={() => setPrefill({ text, nonce: Date.now() })}
+              data-testid={`chip-${label.toLowerCase().replace(/\s+/g, "-")}`}>
+              <Icon className="w-4 h-4 mr-1" /> {label}
+            </Button>
+          ))}
+        </div>
         <ChatInput 
+          prefill={prefill}
           onSendMessage={handleSendMessage}
           isLoading={isLoading}
           language={settings.language}
@@ -367,11 +380,6 @@ export default function ChatInterface({ conversationId, onConversationStart }: C
                 Wake Word: Off
               </>
             )}
-          </Button>
-          
-          <Button variant="secondary" size="sm" data-testid="button-web-search">
-            <i className="fas fa-search mr-1"></i>
-            Web Search: {settings.searchEnabled ? "On" : "Off"}
           </Button>
           
           <Button variant="secondary" size="sm" data-testid="button-language">

@@ -13,6 +13,8 @@ interface ChatInputProps {
   language: string;
   speechEnabled?: boolean;
   onToggleSpeech?: () => void;
+  /** Text to place in the box (e.g. from a writing chip); a new nonce re-applies it. */
+  prefill?: { text: string; nonce: number };
 }
 
 export default function ChatInput({
@@ -21,6 +23,7 @@ export default function ChatInput({
   language,
   speechEnabled = true,
   onToggleSpeech,
+  prefill,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
   const [charCount, setCharCount] = useState(0);
@@ -29,7 +32,23 @@ export default function ChatInput({
   const { captureFrame, isActive: isCameraActive } = useCamera();
   const { toast } = useToast();
 
-  const maxChars = 1000;
+  const maxChars = 6000; // room to paste a job description for a cover letter
+
+  useEffect(() => {
+    if (!prefill) return;
+    setMessage(prefill.text);
+    setCharCount(prefill.text.length);
+    requestAnimationFrame(() => {
+      const box = textareaRef.current;
+      if (!box) return;
+      box.focus();
+      // Select the first [placeholder] so typing replaces it.
+      const start = prefill.text.indexOf("[");
+      const end = prefill.text.indexOf("]", start);
+      if (start >= 0 && end > start) box.setSelectionRange(start, end + 1);
+      else box.setSelectionRange(prefill.text.length, prefill.text.length);
+    });
+  }, [prefill?.nonce]);
 
   // Auto-resize textarea
   useEffect(() => {

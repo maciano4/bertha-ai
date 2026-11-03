@@ -189,7 +189,7 @@ export default function Dashboard() {
             </>}
           </div>
         </section>
-        <footer className="py-5 text-center text-[11px] leading-5 text-[#748078]">This history is temporary and available in this browser session while the server is running.</footer>
+        <footer className="py-5 text-center text-[11px] leading-5 text-[#748078]">Your history is saved to your account and is there every time you log in.</footer>
       </div>
     </main>
   );

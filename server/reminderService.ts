@@ -4,7 +4,7 @@ import { eq, lte, and } from "drizzle-orm";
 import OpenAI from "openai";
 
 // Use the newest OpenAI model is "gpt-5" which was released August 7, 2025. do not change this unless explicitly requested by the user
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || process.env.OpenAI_API_KEY });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || process.env.OpenAI_API_KEY || process.env.OPENAI_KEY || "missing-openai-key" });
 
 export interface ReminderParseResult {
   hasReminder: boolean;

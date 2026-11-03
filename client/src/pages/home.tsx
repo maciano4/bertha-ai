@@ -5,7 +5,9 @@ import SettingsPanel from "@/components/panels/SettingsPanel";
 import ActivityPanel from "@/components/panels/ActivityPanel";
 import SettingsModal from "@/components/modals/SettingsModal";
 import { Button } from "@/components/ui/button";
-import { Settings, Trash2, LayoutDashboard, CalendarDays } from "lucide-react";
+import { Settings, LayoutDashboard, CalendarDays, LogOut, Menu, MessageSquarePlus } from "lucide-react";
+import ConversationSidebar from "@/components/chat/ConversationSidebar";
+import { useAuth } from "@/hooks/useAuth";
 import { Link } from "wouter";
 
 export default function Home() {
@@ -21,13 +23,16 @@ export default function Home() {
     }
   }, []);
 
-  const handleClearConversation = () => {
-    if (confirm("Clear all conversation history?")) {
-      setConversationId(null);
-      // The ChatInterface component will handle clearing its internal state
-      window.location.reload();
-    }
-  };
+  const { user, logout } = useAuth();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Keep ?conversation= in the address bar so a reload reopens the same chat.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (conversationId) url.searchParams.set("conversation", conversationId);
+    else url.searchParams.delete("conversation");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }, [conversationId]);
 
   const handleBackgroundChange = (backgroundUrl: string) => {
     setCustomBackground(backgroundUrl);
@@ -58,11 +63,21 @@ export default function Home() {
 
       {/* Main Chat Interface */}
       <div className="relative z-10 flex h-screen">
+        <ConversationSidebar
+          activeId={conversationId}
+          onSelect={setConversationId}
+          open={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+        />
+
         {/* Chat Container */}
         <div className="flex-1 min-w-0 flex flex-col lg:mr-80">
           {/* Header */}
           <header className="blur-backdrop border-b border-border p-4 flex flex-wrap gap-3 items-center justify-between">
             <div className="flex items-center gap-3">
+              <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSidebarOpen(true)} aria-label="Show your chats" data-testid="button-open-sidebar">
+                <Menu className="h-5 w-5" />
+              </Button>
               {/* Bertha AI Avatar */}
               <div className="relative">
                 <img 
@@ -74,7 +89,9 @@ export default function Home() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-foreground">Bertha AI</h1>
-                <p className="text-sm text-muted-foreground">Intelligent Assistant • Online</p>
+                <p className="text-sm text-muted-foreground truncate max-w-[14rem]" data-testid="text-signed-in">
+                  {user ? `Signed in as ${user.displayName || user.email}` : "Intelligent Assistant"}
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -97,10 +114,22 @@ export default function Home() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={handleClearConversation}
+                onClick={() => setConversationId(null)}
+                aria-label="New chat"
+                title="New chat"
                 data-testid="button-clear"
               >
-                <Trash2 className="h-5 w-5" />
+                <MessageSquarePlus className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => logout()}
+                aria-label="Log out"
+                title="Log out"
+                data-testid="button-logout"
+              >
+                <LogOut className="h-5 w-5" />
               </Button>
             </div>
           </header>

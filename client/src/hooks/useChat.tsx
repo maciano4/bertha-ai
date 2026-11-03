@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiRequest, notifyIfUnauthorized } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 export interface Message {
@@ -24,22 +24,38 @@ export interface ChatSettings {
 
 const isLocalOnly = (id: string) => id.startsWith("local-") || id.startsWith("appointment-reminder-");
 
+class ChatError extends Error {
+  constructor(message: string, public code?: string, public status?: number) { super(message); }
+  partial?: { id: string; text: string };
+}
+
 // Turns a failed /api/chat response into plain words for the fallback reply.
 function describeChatError(error: unknown): { short: string; detail: string; ai: boolean } {
-  const text = (error instanceof Error ? error.message : String(error)).slice(0, 240);
-  if (/insufficient_quota|quota|billing|credit/i.test(text)) {
-    return { ai: true, short: "the OpenAI account is out of credits", detail: `OpenAI says there are no credits left. Add credits, or put a new OPENAI_API_KEY in Replit Secrets. (${text})` };
+  const text = (error instanceof Error ? error.message : String(error)).slice(0, 300);
+  const code = error instanceof ChatError ? error.code : undefined;
+  if (code === "insufficient_quota" || /insufficient_quota|out of credits/i.test(text)) {
+    return { ai: true, short: "the OpenAI account is out of credits", detail: text };
   }
-  if (/invalid_api_key|incorrect api key|OpenAI 401/i.test(text)) {
-    return { ai: true, short: "the OpenAI API key is missing or invalid", detail: `Check OPENAI_API_KEY in Replit Secrets. (${text})` };
+  if (code === "no_api_key" || code === "invalid_api_key" || /invalid_api_key|incorrect api key/i.test(text)) {
+    return { ai: true, short: "the OpenAI API key is missing or invalid", detail: text };
   }
-  if (/AI service unavailable|OpenAI|AI response/i.test(text)) {
-    return { ai: true, short: "the AI service returned an error", detail: text };
-  }
+  if (code === "rate_limited") return { ai: true, short: "the AI is busy", detail: text };
+  if (code && /model_not_found|ai_|context_too_long/.test(code)) return { ai: true, short: "the AI service returned an error", detail: text };
+  if (code === "not_signed_in") return { ai: false, short: "you have been signed out", detail: "Please log in again." };
   if (/Failed to fetch|NetworkError|Load failed/i.test(text)) {
-    return { ai: false, short: "I could not reach the Bertha server", detail: "The server did not answer. Check that the Replit app is running." };
+    return { ai: false, short: "I could not reach the Bertha server", detail: "The server did not answer. Check your connection and that the Replit app is running." };
   }
   return { ai: false, short: "the server returned an error", detail: text };
+}
+
+async function readError(response: Response) {
+  const text = await response.text();
+  try {
+    const data = JSON.parse(text);
+    return new ChatError(data.error || data.message || `Request failed (${response.status})`, data.code, response.status);
+  } catch {
+    return new ChatError(text || `Request failed (${response.status})`, undefined, response.status);
+  }
 }
 
 export function useChat(conversationId: string | null) {
@@ -52,7 +68,17 @@ export function useChat(conversationId: string | null) {
   const busyRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => { activeConversationRef.current = conversationId; }, [conversationId]);
+  const [streamingId, setStreamingId] = useState<string | null>(null);
+
+  // Switching conversations (sidebar, "New chat") clears the screen. When sendMessage
+  // creates the conversation itself, the ref already matches and nothing is cleared.
+  useEffect(() => {
+    if (activeConversationRef.current !== conversationId) {
+      activeConversationRef.current = conversationId;
+      setMessages([]);
+      setLatestReply(null);
+    }
+  }, [conversationId]);
 
   const history = useQuery({
     queryKey: ["/api/conversations", conversationId, "messages"],
@@ -81,24 +107,71 @@ export function useChat(conversationId: string | null) {
     setLatestReply(reply);
   }, []);
 
-  const sendMessageMutation = useMutation({
-    mutationFn: async ({ message, settings, targetId }: { message: string; settings: ChatSettings; targetId: string }) => {
-      const response = await apiRequest("POST", "/api/chat", {
+  const finishReply = useCallback((reply: Message) => {
+    setMessages(current => current.some(item => item.id === reply.id)
+      ? current.map(item => item.id === reply.id ? reply : item)
+      : [...current, reply]);
+    setLatestReply(reply); // speech happens once, on the finished reply
+  }, []);
+
+  // Streams the reply when the server sends NDJSON; plain JSON replies (appointments,
+  // reminders, weather, greetings) arrive in one piece.
+  const postChat = useCallback(async (message: string, settings: ChatSettings, targetId: string) => {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
         message,
         conversationId: targetId,
         language: settings.language,
-        searchEnabled: settings.searchEnabled,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-      });
-      return response.json();
-    },
-    onSuccess: data => {
-      addAssistantMessage(data.response);
-      cache.invalidateQueries({ queryKey: ["/api/conversations"] });
-      cache.invalidateQueries({ queryKey: ["appointments"] });
-      cache.invalidateQueries({ queryKey: ["/api/appointments"] });
-    },
-  });
+        stream: true,
+      }),
+    });
+    notifyIfUnauthorized(response);
+    if (!response.ok) throw await readError(response);
+    const id = crypto.randomUUID();
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("ndjson") || !response.body) {
+      const data = await response.json();
+      finishReply({ id, role: "assistant", content: data.response, timestamp: new Date(), metadata: { translationUsed: data.translationUsed, recognizedUser: data.recognizedUser || undefined } });
+      return;
+    }
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let text = "";
+    let started = false;
+    const show = (content: string) => setMessages(current => current.some(item => item.id === id)
+      ? current.map(item => item.id === id ? { ...item, content } : item)
+      : [...current, { id, role: "assistant", content, timestamp: new Date() }]);
+    while (true) {
+      const { value, done } = await reader.read();
+      if (value) buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = done ? "" : lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const event = JSON.parse(line);
+        if (event.type === "delta") {
+          text += event.text;
+          if (!started) { started = true; setStreamingId(id); }
+          show(text);
+        } else if (event.type === "done") {
+          finishReply({ id, role: "assistant", content: event.response, timestamp: new Date(), metadata: { translationUsed: event.translationUsed, recognizedUser: event.recognizedUser || undefined } });
+          return;
+        } else if (event.type === "error") {
+          const failure = new ChatError(event.error, event.code);
+          if (text.trim()) failure.partial = { id, text: text.trim() };
+          throw failure;
+        }
+      }
+      if (done) break;
+    }
+    if (text.trim()) finishReply({ id, role: "assistant", content: text, timestamp: new Date() });
+    else throw new ChatError("The answer was interrupted. Please try again.");
+  }, [finishReply]);
 
   const sendMessage = useCallback(async (content: string, settings: ChatSettings): Promise<string | null> => {
     if (!content.trim() || busyRef.current) return null;
@@ -116,17 +189,25 @@ export function useChat(conversationId: string | null) {
         targetId = conversation.id as string;
         activeConversationRef.current = targetId;
       }
-      await sendMessageMutation.mutateAsync({ message: content.trim(), settings, targetId });
+      await postChat(content.trim(), settings, targetId);
+      cache.invalidateQueries({ queryKey: ["/api/conversations"] });
+      cache.invalidateQueries({ queryKey: ["appointments"] });
+      cache.invalidateQueries({ queryKey: ["/api/appointments"] });
+      cache.invalidateQueries({ queryKey: ["appointment-reminders"] });
       return targetId;
     } catch (error) {
       const reason = describeChatError(error);
       console.error("Chat request failed:", error);
       // The server did not save this exchange, so keep both bubbles locally.
       setMessages(previous => previous.map(item => item.id === userMessageId ? { ...item, id: `local-${userMessageId}` } : item));
+      const partial = error instanceof ChatError ? error.partial : undefined;
+      if (partial) setMessages(previous => previous.filter(item => item.id !== partial.id));
       // Always answer, so a voice request never ends in silence.
       addAssistantMessage(
-        reason.ai
-          ? `I heard you, dear, but my AI service is unavailable right now (${reason.short}). I can still help with your appointments.`
+        partial
+          ? `${partial.text}\n\n(My answer was cut off: ${reason.short}. Please ask again.)`
+          : reason.ai
+          ? `I heard you, dear, but my AI service is unavailable right now (${reason.short}). I can still save appointments and reminders for you.`
           : `I heard you, dear, but I could not answer just now (${reason.short}). Please try again in a moment.`,
         `local-fallback-${userMessageId}`,
       );
@@ -135,8 +216,9 @@ export function useChat(conversationId: string | null) {
     } finally {
       busyRef.current = false;
       setIsLoading(false);
+      setStreamingId(null);
     }
-  }, [addAssistantMessage, sendMessageMutation, toast]);
+  }, [addAssistantMessage, postChat, toast, cache]);
 
   const addSystemMessage = useCallback((content: string) => {
     setMessages(previous => [...previous, { id: crypto.randomUUID(), role: "system", content, timestamp: new Date() }]);
@@ -147,7 +229,7 @@ export function useChat(conversationId: string | null) {
   }, []);
 
   return {
-    messages, latestReply, isLoading, sendMessage, addAssistantMessage,
+    messages, latestReply, isLoading, isStreaming: !!streamingId, sendMessage, addAssistantMessage,
     addSystemMessage, clearMessages, scrollToBottom, messagesEndRef,
     historyError: history.error,
   };

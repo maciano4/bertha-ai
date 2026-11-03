@@ -266,24 +266,6 @@ export default function SettingsModal({ isOpen, onClose, onBackgroundChange }: S
               </div>
 
               <div className="flex items-center justify-between">
-                <Label className="text-sm text-muted-foreground">Web Search</Label>
-                <Switch
-                  checked={settings.searchEnabled}
-                  onCheckedChange={(checked) => updateSettings({ searchEnabled: checked })}
-                  data-testid="switch-modal-search"
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <Label className="text-sm text-muted-foreground">Save Conversation History</Label>
-                <Switch
-                  checked={settings.saveHistory}
-                  onCheckedChange={(checked) => updateSettings({ saveHistory: checked })}
-                  data-testid="switch-save-history"
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
                 <Label className="text-sm text-muted-foreground">Analytics & Improvement</Label>
                 <Switch
                   checked={settings.analytics}

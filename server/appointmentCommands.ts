@@ -95,3 +95,47 @@ export function parseAppointmentCommand(message: string, upcoming: Appointment[]
     location,
   };
 }
+
+export type ReminderCommand =
+  | { action: "none" }
+  | { action: "clarify"; question: string }
+  | { action: "create"; title: string; localStart: string };
+
+// "Remind me to call Mom at 5pm", "remind me in 20 minutes to take my pills",
+// "set a reminder for tomorrow at 9am to water the plants".
+export function parseReminderCommand(message: string, timeZone: string, now = new Date()): ReminderCommand {
+  const text = message.trim();
+  if (!/^(?:(?:hey\s+|hi\s+)?bertha[,\s]+)?(?:please\s+)?(?:can|could|would)?\s*(?:you\s+)?(?:please\s+)?(?:remind\s+me\b|set\s+(?:a|an|me\s+a)\s+reminder\b|add\s+a\s+reminder\b|create\s+a\s+reminder\b)/i.test(text)) return { action: "none" };
+  if (/\b\d+\s*(?:minutes?|mins?|hours?|hrs?)\s+before\b/i.test(text)) return { action: "none" }; // appointment reminder syntax
+  const p = localParts(now, timeZone);
+  const localReference = new Date(Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute));
+  const parsed = chrono.en.parse(text, { instant: localReference, timezone: 0 }, { forwardDate: true })[0];
+  const title = (parsed ? text.slice(0, parsed.index) + " " + text.slice(parsed.index + parsed.text.length) : text)
+    .replace(/^(?:(?:hey\s+|hi\s+)?bertha[,\s]+)?(?:please\s+)?(?:can|could|would)?\s*(?:you\s+)?(?:please\s+)?/i, "")
+    .replace(/^(?:remind\s+me|set\s+(?:a|an|me\s+a)\s+reminder|add\s+a\s+reminder|create\s+a\s+reminder)\s*/i, "")
+    .replace(/^(?:for|at|on)\s+/i, "")
+    .replace(/^(?:to|that|about)\s+/i, "")
+    .replace(/\s+(?:at|on|for|by|in)\s*$/i, "")
+    .replace(/[?.!]+$/, "").replace(/\s+/g, " ").trim()
+    .replace(/^(?:to|that|about)\s+/i, "");
+  if (!parsed) return { action: "clarify", question: `When should I remind you${title ? ` to ${title}` : ""}? For example, “remind me to call Mom tomorrow at 5pm”. I haven't saved anything yet.` };
+  if (!title) return { action: "clarify", question: "What should I remind you about? For example, “remind me to take my pills at 8pm”." };
+  const start = parsed.start;
+  const relative = /\bin\s+\d+\s*(?:minutes?|mins?|hours?|hrs?)\b/i.test(parsed.text) || /\bin\s+(?:an?|one)\s+(?:hour|minute)\b/i.test(parsed.text);
+  if (!relative && !start.isCertain("hour")) return { action: "clarify", question: `What time should I remind you to ${title}? Please include am or pm.` };
+  if (!relative && start.get("hour")! <= 12 && !start.isCertain("meridiem") && !/\b(?:0\d:\d{2}|noon|midnight)\b/i.test(parsed.text)) {
+    return { action: "clarify", question: `Is that am or pm? Please say it again, like “remind me to ${title} at 5pm”.` };
+  }
+  const pad = (value: number) => String(value).padStart(2, "0");
+  let localStart = `${start.get("year")}-${pad(start.get("month")!)}-${pad(start.get("day")!)}T${pad(start.get("hour")!)}:${pad(start.get("minute")!)}`;
+  let instant = zonedDateTime(localStart, timeZone);
+  const hasDay = start.isCertain("day") || start.isCertain("weekday") || /\b(today|tomorrow|tonight)\b/i.test(parsed.text);
+  if (instant && instant.getTime() <= now.getTime() && !hasDay && !relative) {
+    // "at 8am" when it's already 9am means tomorrow at 8am.
+    const next = new Date(Date.UTC(start.get("year")!, start.get("month")! - 1, start.get("day")! + 1));
+    localStart = `${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}-${pad(next.getUTCDate())}T${pad(start.get("hour")!)}:${pad(start.get("minute")!)}`;
+    instant = zonedDateTime(localStart, timeZone);
+  }
+  if (!instant || instant.getTime() <= now.getTime()) return { action: "clarify", question: "That time has already passed. Please give me a future time for the reminder. I haven't saved anything yet." };
+  return { action: "create", title: title.charAt(0).toUpperCase() + title.slice(1), localStart };
+}
