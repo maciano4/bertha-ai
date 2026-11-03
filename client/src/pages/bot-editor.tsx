@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
-import { Sparkles, Volume2, Upload, X, Link2, Loader2 } from "lucide-react";
+import { Sparkles, Volume2, Upload, X, Link2, Loader2, Trash2, MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,6 +10,7 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import PageShell from "@/components/bots/PageShell";
 import BotCard from "@/components/bots/BotCard";
 import BotAvatar from "@/components/bots/BotAvatar";
@@ -89,6 +90,7 @@ export default function BotEditor() {
   const [drafting, setDrafting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [urlInput, setUrlInput] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const options = useQuery<{ models: string[]; defaultModel: string }>({ queryKey: ["/api/bots/options"] });
   const existing = useQuery<OwnedBot>({ queryKey: ["/api/bots", editingId], enabled: !!editingId });
@@ -99,7 +101,7 @@ export default function BotEditor() {
     setForm({
       name: bot.name, description: bot.description || "", instructions: bot.instructions || "", greeting: bot.greeting || "",
       avatarEmoji: bot.avatarEmoji || "🤖", avatarUrl: bot.avatarUrl, voiceName: bot.voiceName, voiceRate: Number(bot.voiceRate) || 1,
-      voicePitch: Number(bot.voicePitch ?? 1), model: bot.model, visibility: bot.visibility, showInstructions: !!bot.showInstructions,
+      voicePitch: Number(bot.voicePitch ?? 1), model: bot.model, visibility: bot.visibility === "private" ? "private" : "link", showInstructions: !!bot.showInstructions,
     });
     if (bot.avatarUrl && !bot.avatarUrl.startsWith("data:")) setUrlInput(bot.avatarUrl);
   }, [existing.data]);
@@ -188,7 +190,8 @@ export default function BotEditor() {
       cache.invalidateQueries({ queryKey: ["/api/conversations"] });
       setSaved(bot);
       toast({ title: editingId ? "Bot saved" : `${bot.name} is ready`, description: bot.visibility === "private" ? "Only you can chat with it." : "Anyone with the link can chat with it." });
-      if (!editingId) navigate(`/bots/${bot.id}/edit?created=1`, { replace: true });
+      // A new bot opens straight into its chat; edits stay here.
+      if (!editingId) navigate(`/?bot=${bot.id}`);
     } catch (err) {
       setError(apiErrorInfo(err).message);
     } finally {
@@ -208,12 +211,27 @@ export default function BotEditor() {
     }
   };
 
+  const removeBot = async () => {
+    if (!saved) return;
+    try {
+      await apiRequest("DELETE", `/api/bots/${saved.id}`);
+      cache.invalidateQueries({ queryKey: ["/api/bots"] });
+      cache.invalidateQueries({ queryKey: ["/api/conversations"] });
+      cache.invalidateQueries({ queryKey: ["/api/usage"] });
+      toast({ title: `${saved.name} deleted` });
+      navigate("/");
+    } catch (err) {
+      toast({ title: "Could not delete the bot", description: apiErrorInfo(err).message, variant: "destructive" });
+    }
+  };
+
+  const backTo = editingId ? `/?bot=${editingId}` : "/";
   const voiceGroups = useMemo(() => [...voices].sort((a, b) => a.lang.localeCompare(b.lang) || a.name.localeCompare(b.name)), [voices]);
 
-  if (editingId && existing.isLoading) return <PageShell title="Edit bot" back="/bots" backLabel="My Bots"><p className="text-muted-foreground">Loading...</p></PageShell>;
+  if (editingId && existing.isLoading) return <PageShell title="Edit bot" back={backTo} backLabel="Back to chat"><p className="text-muted-foreground">Loading...</p></PageShell>;
   if (editingId && (existing.error || (existing.data && !existing.data.isOwner))) {
     return (
-      <PageShell title="Edit bot" back="/bots" backLabel="My Bots">
+      <PageShell title="Edit bot" back="/" backLabel="Back to chat">
         <p role="alert" className="text-destructive" data-testid="text-edit-denied">You can only edit bots you made. This one doesn't exist or belongs to someone else.</p>
       </PageShell>
     );
@@ -224,16 +242,16 @@ export default function BotEditor() {
   return (
     <PageShell
       title={editingId ? `Edit ${saved?.name || "bot"}` : "Create a bot"}
-      back="/bots" backLabel="My Bots"
+      back={backTo} backLabel="Back to chat"
       actions={<>
-        {saved && <Button variant="outline" onClick={() => navigate(`/?bot=${saved.id}`)} data-testid="button-chat-now">Chat with it</Button>}
+        {saved && <Button variant="outline" onClick={() => navigate(`/?bot=${saved.id}`)} data-testid="button-chat-now"><MessageCircle className="mr-1.5 h-4 w-4" /> Chat</Button>}
         <Button onClick={save} disabled={!canSave} data-testid="button-save-bot">{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}{editingId ? "Save changes" : "Create bot"}</Button>
       </>}
     >
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <form className="space-y-6" onSubmit={event => { event.preventDefault(); if (canSave) save(); }}>
           {!editingId && (
-            <section className="rounded-2xl border border-border bg-background/90 p-5">
+            <section className="rounded-2xl border border-border bg-card/60 p-5">
               <h2 className="mb-1 font-semibold">Start from a template</h2>
               <p className="mb-3 text-sm text-muted-foreground">Pick one and change anything you like, or start from scratch.</p>
               <div className="flex flex-wrap gap-2">
@@ -246,7 +264,7 @@ export default function BotEditor() {
             </section>
           )}
 
-          <section className="space-y-4 rounded-2xl border border-border bg-background/90 p-5">
+          <section className="space-y-4 rounded-2xl border border-border bg-card/60 p-5">
             <h2 className="font-semibold">About your bot</h2>
             <Field label="Name" htmlFor="bot-name" count={form.name.length} max={LIMITS.name}>
               <Input id="bot-name" value={form.name} onChange={e => set("name", e.target.value)} placeholder="e.g. Coach Max" data-testid="input-bot-name" />
@@ -278,7 +296,7 @@ export default function BotEditor() {
             </Field>
           </section>
 
-          <section className="space-y-3 rounded-2xl border border-border bg-background/90 p-5">
+          <section className="space-y-3 rounded-2xl border border-border bg-card/60 p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-semibold">Instructions</h2>
               <Button type="button" variant="secondary" size="sm" onClick={draftInstructions} disabled={drafting} data-testid="button-ai-instructions">
@@ -293,7 +311,7 @@ export default function BotEditor() {
             </Field>
           </section>
 
-          <section className="space-y-4 rounded-2xl border border-border bg-background/90 p-5">
+          <section className="space-y-4 rounded-2xl border border-border bg-card/60 p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-semibold">Voice</h2>
               <Button type="button" variant="outline" size="sm" onClick={testVoice} data-testid="button-test-voice"><Volume2 className="mr-1.5 h-4 w-4" /> Test voice</Button>
@@ -322,13 +340,12 @@ export default function BotEditor() {
             </div>
           </section>
 
-          <section className="space-y-4 rounded-2xl border border-border bg-background/90 p-5">
+          <section className="space-y-4 rounded-2xl border border-border bg-card/60 p-5">
             <h2 className="font-semibold">Sharing and advanced</h2>
             <RadioGroup value={form.visibility} onValueChange={value => set("visibility", value as Visibility)} className="space-y-2" aria-label="Who can chat with this bot">
               {([
                 ["private", "Private", "Only you can chat with it."],
-                ["unlisted", "Unlisted", "Anyone with the link can chat with it. It isn't listed on Explore."],
-                ["public", "Public", "Listed on Explore, and anyone with the link can chat with it."],
+                ["link", "Anyone with the link", "People you send the link to can sign in and chat with it. It's never listed anywhere."],
               ] as const).map(([value, label, help]) => (
                 <label key={value} className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3 hover:bg-foreground/5" data-testid={`visibility-${value}`}>
                   <RadioGroupItem value={value} id={`vis-${value}`} className="mt-0.5" />
@@ -366,15 +383,26 @@ export default function BotEditor() {
 
           {error && <p role="alert" className="rounded-md bg-destructive/10 p-3 text-sm text-destructive" data-testid="text-bot-error">{error}</p>}
           <div className="flex justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => navigate("/bots")}>Cancel</Button>
+            <Button type="button" variant="ghost" onClick={() => navigate(backTo)}>Cancel</Button>
             <Button type="submit" disabled={!canSave} data-testid="button-save-bot-bottom">{editingId ? "Save changes" : "Create bot"}</Button>
           </div>
+          {saved && (
+            <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-destructive/30 bg-destructive/5 p-5" data-testid="danger-zone">
+              <div>
+                <h2 className="font-semibold">Delete this bot</h2>
+                <p className="text-sm text-muted-foreground">Removes it and every chat anyone has had with it. This can't be undone.</p>
+              </div>
+              <Button type="button" variant="outline" className="border-destructive/50 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setConfirmDelete(true)} data-testid="button-delete-bot">
+                <Trash2 className="mr-1.5 h-4 w-4" /> Delete bot
+              </Button>
+            </section>
+          )}
         </form>
 
         <aside className="lg:sticky lg:top-20 lg:self-start space-y-3" aria-label="Live preview">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Live preview</h2>
           <BotCard name={form.name} description={form.description} avatarEmoji={form.avatarEmoji} avatarUrl={form.avatarUrl} visibility={form.visibility} />
-          <div className="rounded-2xl border border-border bg-background/90 p-4" data-testid="bot-preview-chat">
+          <div className="rounded-2xl border border-border bg-card/60 p-4" data-testid="bot-preview-chat">
             <div className="flex gap-2">
               <BotAvatar emoji={form.avatarEmoji} url={form.avatarUrl} name={form.name || "Bot"} className="h-8 w-8 text-lg" />
               <div className="min-w-0">
@@ -390,6 +418,18 @@ export default function BotEditor() {
           </div>
         </aside>
       </div>
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete "{saved?.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>This deletes the bot and every chat anyone has had with it, including people you shared it with. This can't be undone.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction onClick={removeBot} className="bg-destructive text-destructive-foreground hover:bg-destructive/90" data-testid="button-confirm-delete-bot">Delete bot</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageShell>
   );
 }

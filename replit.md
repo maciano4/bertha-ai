@@ -2,18 +2,40 @@
 
 ## Overview
 
-Bertha AI is an intelligent conversational assistant application built with a modern full-stack architecture. The system combines real-time chat capabilities with advanced features including voice interaction, camera integration, multi-language translation, and file upload functionality. The application provides an interactive dashboard-style interface where users can communicate with an AI assistant through multiple input modalities.
+Bertha AI is an intelligent conversational assistant application built with a modern full-stack architecture. The system combines real-time chat capabilities with advanced features including voice interaction, camera integration, multi-language translation, and file upload functionality. The application is an installable, app-style interface (a bot sidebar and a chat pane) where users can communicate with an AI assistant through multiple input modalities.
 
 ## User Preferences
 
 Preferred communication style: Simple, everyday language.
+
+## Stage 2-app: app-style layout, no Explore, installable (branch `stage2-app`)
+
+### What's new
+- **Layout.** A full-screen dark app with no page scroll.
+  - Left sidebar: + New bot, then Bertha (pinned), then your bots, then Shared with me. Each bot has its own chats and a New chat button.
+  - Sidebar footer: Install app, Appointments, and an account menu (usage, Manage bots, Settings, Log out).
+  - On phones the sidebar is a drawer.
+  - Chat header: New chat, Share, and a gear for bot settings (owner only).
+  - Code: `client/src/components/app/` (AppShell, BotSidebar, ShareDialog, InstallApp), `client/src/lib/chatNav.ts` (the chat lives in the URL `/?bot=&conversation=`), and a rewritten `client/src/pages/home.tsx`.
+- **Explore is removed.** The page, links and API are gone, and `/explore` and `/dashboard` redirect to `/`. Visibility is now `private` or `link`. Old `unlisted`/`public` bots are migrated to `link` on boot. `/b/<slug>` still works, and opening it signed in adds the bot to Shared with me (table `bertha_bot_shares`; API `GET/POST /api/bots/shared`, `DELETE /api/bots/shared/:id`).
+- **PWA.**
+  - Files: `client/public/manifest.webmanifest`, `client/public/sw.js` and `client/public/icons/*`.
+  - Registration and the install prompt live in `client/src/lib/pwa.ts`.
+  - The service worker only registers in production builds (`npm run build` + `npm start`, i.e. the Replit deployment), and it never caches `/api`, auth or uploaded objects.
+  - To ship a service-worker change, bump `VERSION` in `sw.js`.
+
+### Deploying this branch on Replit
+1. In the Shell: `git fetch github && git checkout -b stage2-app github/stage2-app` (if the branch already exists locally: `git checkout stage2-app && git pull github stage2-app`).
+2. Run `npm install`.
+3. Press **Run**. The new table and the visibility change are applied automatically. **Don't run `db:push`.**
+4. To try "Install app", use the deployed (production) URL. Installing needs HTTPS and the production build; in the dev preview the service worker is off on purpose.
 
 ## Stage 2 bot builder (branch `stage2-bots`)
 
 ### What's new
 - **My Bots** page (`/bots`, `/bots/new`, `/bots/:id/edit`): create, edit, duplicate and delete custom bots, with templates (Tutor, Fitness Coach, Customer Support, Writing Assistant, Travel Planner), an "AI: help me write instructions" button, a voice picker with Test voice, and a live preview.
 - **Chat with any bot.** Each conversation has a `bot_id` (empty means Bertha). The sidebar has a bot switcher and a "this bot / all chats" filter. Bot instructions sit under the honesty and date rules. Voice replies use the bot's voice. "Hi Bertha" still works, and "Hi <bot name>" works too.
-- **Sharing.** Private, unlisted or public. `/b/<slug>` shows the bot card (signed-out visitors get a sign-up prompt). `/explore` lists public bots. Shared users chat in their own conversations; only the owner can edit; instructions are hidden by default.
+- **Sharing.** Private or anyone with the link (Stage 2 also had unlisted/public and `/explore`; Stage 2-app removed them). `/b/<slug>` shows the bot card (signed-out visitors get a sign-up prompt). Shared users chat in their own conversations; only the owner can edit; instructions are hidden by default.
 - **Usage tracking.** Bots and daily messages are counted; limits are off unless `BERTHA_ENFORCE_LIMITS=true` (see `server/limits.ts`, ready for Stripe in Stage 3).
 - **Code.** Server: `server/bots.ts`, `server/limits.ts`, plus changes to `server/openai.ts` (bot persona and prompt layering), `server/routes.ts`, `server/chatStore.ts`, `server/platformTables.ts` and `shared/schema.ts`. Client: `client/src/pages/bots.tsx`, `bot-editor.tsx`, `explore.tsx`, `bot-share.tsx`, `client/src/lib/bots.ts`, `client/src/components/bots/*`, and updates to the chat components and speech hooks.
 

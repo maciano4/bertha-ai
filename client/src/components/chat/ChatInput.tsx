@@ -195,7 +195,7 @@ export default function ChatInput({
         variant={isListening ? "default" : "secondary"}
         size="icon"
         onClick={handleVoiceInput}
-        className={isListening ? "speech-pulse" : ""}
+        className={isListening ? "relative speech-pulse" : "relative"}
         data-testid="button-voice"
         title={speechEnabled ? "Click to speak - will auto-send when you stop talking" : "Click to speak"}
       >

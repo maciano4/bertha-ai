@@ -13,7 +13,7 @@ import { registerAppointmentRoutes, handleAppointmentChat, handleReminderChat, l
 import { describeTime, validTimeZone } from "./appointmentDates";
 import { registerAuthRoutes, requireAuth } from "./auth";
 import * as chats from "./chatStore";
-import { registerBotRoutes, registerPublicBotRoutes, getChatBot } from "./bots";
+import { registerBotRoutes, registerPublicBotRoutes, getChatBot, rememberSharedBot } from "./bots";
 import { assertCanSendMessage, recordMessage, LimitError } from "./limits";
 
 const WRITING_REQUEST = /^\s*(?:(?:hey\s+|hi\s+)?bertha[,\s]+)?(?:please\s+)?(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?(?:help\s+me\s+)?(?:write|draft|compose|rewrite|reword|proofread|polish|translate)\b/i;
@@ -358,6 +358,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const botId = conversation ? conversation.botId : (typeof req.body?.botId === "string" && req.body.botId ? req.body.botId : null);
       const bot = botId ? await getChatBot(botId, user.id) : null;
       if (botId && !bot) return res.status(403).json({ error: "This bot is no longer shared, so you can't chat with it. Your earlier messages are still here.", code: "bot_unavailable" });
+      if (bot && !conversation) await rememberSharedBot(user.id, bot);
       await assertCanSendMessage(user.id);
       const quickReply = async (response: string, metadata: Record<string, unknown>) => {
         await chats.saveExchange(convId, message, response, metadata);
@@ -514,7 +515,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/conversations", async (req, res) => {
     try {
       const botId = typeof req.body?.botId === "string" && req.body.botId && req.body.botId !== "bertha" ? req.body.botId : null;
-      if (botId && !await getChatBot(botId, req.user!.id)) return res.status(404).json({ error: "That bot doesn't exist or isn't shared.", code: "bot_not_found" });
+      const bot = botId ? await getChatBot(botId, req.user!.id) : null;
+      if (botId && !bot) return res.status(404).json({ error: "That bot doesn't exist or isn't shared.", code: "bot_not_found" });
+      if (bot) await rememberSharedBot(req.user!.id, bot);
       res.status(201).json(await chats.createConversation(req.user!.id, req.body?.title, botId));
     }
     catch (error) { sendError(res, error, "Failed to create conversation"); }

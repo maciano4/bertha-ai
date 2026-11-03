@@ -239,9 +239,9 @@ export default function ChatInterface({ conversationId, onConversationStart, bot
   useEffect(() => () => stopSpeaking(), [stopSpeaking]);
 
   return (
-    <div className="flex-1 min-w-0 flex flex-col" onClick={handleUserInteraction}>
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col" onClick={handleUserInteraction}>
       {/* Chat Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4" data-testid="chat-area">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-3 py-4 sm:px-6 [&>*]:mx-auto [&>*]:max-w-3xl" data-testid="chat-area">
         {historyError && <p role="alert" className="text-sm text-destructive">This conversation could not be loaded. It may have been deleted. Pick another chat on the left or start a new one.</p>}
         {appointmentReminders.error && <p role="status" className="text-sm text-destructive">Appointment reminders are temporarily unavailable. Bertha will retry automatically.</p>}
         {/* Welcome Message */}
@@ -299,11 +299,11 @@ export default function ChatInterface({ conversationId, onConversationStart, bot
       </div>
 
       {/* Input Area */}
-      <div className="blur-backdrop border-t border-border p-4">
+      <div className="border-t border-border/70 bg-background/80 px-3 pt-3 backdrop-blur-xl sm:px-6" style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}>
         {/* Writing helpers: fill the box with a starter the user finishes */}
-        <div className="flex flex-wrap gap-2 mb-3 max-w-4xl mx-auto" data-testid="writing-chips">
+        <div className="no-scrollbar -mx-3 mb-2.5 flex max-w-4xl gap-2 overflow-x-auto px-3 sm:mx-auto sm:flex-wrap sm:overflow-visible sm:px-0" data-testid="writing-chips">
           {WRITING_STARTERS.map(({ label, icon: Icon, text }) => (
-            <Button key={label} variant="outline" size="sm" className="rounded-full"
+            <Button key={label} variant="outline" size="sm" className="h-8 shrink-0 rounded-full border-border bg-card/60 text-xs"
               onClick={() => setPrefill({ text, nonce: Date.now() })}
               data-testid={`chip-${label.toLowerCase().replace(/\s+/g, "-")}`}>
               <Icon className="w-4 h-4 mr-1" /> {label}

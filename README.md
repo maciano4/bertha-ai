@@ -2,6 +2,25 @@
 
 Bertha is a voice-first personal assistant with a warm grandmother persona. You can talk to her ("Hi Bertha"), type to her, have her save appointments and reminders, and have her write texts, emails, social posts and cover letters.
 
+## What's new in Stage 2-app: Bertha looks and runs like an app
+
+- **One app screen.** The whole app is a single full-screen, dark view with no page scrolling. On the left is a sidebar: **+ New bot** at the top, then **Bertha** (always first), then **your bots**, then **Shared with me**. Each row shows the bot's picture and name. Click a bot to open its latest chat. Use the arrow to see its chats, start a **New chat**, or delete a chat. The old dashboard and separate chat list are gone.
+- **Chat header.** It shows the bot's name, **New chat**, **Share**, and a **gear** that opens the bot's settings (owner only). With Bertha you also get **Appointments** and **Voice & Language settings**.
+- **Sidebar footer.** It has **Install app**, **Appointments**, and an account menu with today's usage, **Manage bots** (`/bots`), **Settings** and **Log out**.
+- **Phones.** The sidebar becomes a slide-out drawer. Tap the menu button to open it; tap outside it, press Escape or pick a chat to close it. The layout respects the iPhone notch and home bar.
+- **Explore is removed.** There is no `/explore` page and no explore API, and `/explore` now redirects to the chat. A bot is either **Private** or **Anyone with the link**. Bots that used to be "Unlisted" or "Public" become "Anyone with the link" automatically, and their links keep working.
+- **Share dialog.** Copy the link, switch link sharing on or off, or make a new link (the old one stops working).
+  - Opening `/b/<slug>` while signed in opens the bot straight away and adds it to **Shared with me**.
+  - People who aren't signed in see the bot's card and a sign-up prompt. After they sign up, the bot opens.
+  - People a bot was shared with can **Remove from sidebar** in the same dialog.
+  - If the creator turns sharing off or deletes the bot, it drops out of Shared with me. Chats you already had with it stay in the sidebar, marked "off", so you can still read them.
+- **Installable (PWA).**
+  - The app has a web manifest (`client/public/manifest.webmanifest`), icons including a maskable one and an apple-touch-icon, and a service worker (`client/public/sw.js`).
+  - The service worker caches **only the app shell** (the page, JS/CSS, icons and the manifest). It never caches `/api`, sign-in or uploaded files, and it only runs in production builds.
+  - **Install app** uses the browser's install prompt where there is one (Chrome, Edge, Android). On iPhone or iPad it shows the Safari steps: Share → Add to Home Screen.
+- **Unchanged:** voice, "Hi Bertha" (and "Hi <bot name>"), continuous conversation, the browser-voice fallback, writing tools, appointments and reminders, sign-in, usage limits, and owner-only bot editing.
+- **Database:** a new `bertha_bot_shares` table (the list behind "Shared with me") is created automatically on server start, together with the visibility migration. No `db:push` is needed.
+
 ## What's new in Stage 2: build and share your own bots
 
 - **My Bots** (`/bots`). Create, edit, duplicate and delete your own assistants. Each bot has a name, a short description, instructions (its role and personality), a greeting, an emoji or picture, a browser voice (voice, speed, pitch), an optional AI model, and a sharing setting.
@@ -9,7 +28,7 @@ Bertha is a voice-first personal assistant with a warm grandmother persona. You 
   - **AI: help me write instructions** drafts (or improves) the instructions from the name and description. If the OpenAI account is out of credits you get a plain message saying so.
   - A **live preview** shows the bot's card and greeting as you type. **Test voice** speaks the greeting with the chosen voice.
 - **Chat with any bot.** Every conversation belongs to one bot (Bertha is the default). The chat list has a **bot switcher** and a filter (this bot / all chats). Bot instructions are added on top of the honesty, date and safety rules, which they can't override. Writing tools, appointments and reminders work with every bot. Voice replies use the bot's voice settings. "Hi Bertha" always works, and you can also say "Hi <bot name>" (a greeting word is needed so the name alone doesn't wake it).
-- **Sharing.** Each bot is **Private** (only you), **Unlisted** (anyone with the link) or **Public** (the link, plus the **Explore** page). The link is `/b/<slug>`.
+- **Sharing.** Each bot is **Private** (only you) or **Anyone with the link**. The link is `/b/<slug>`. (Stage 2 also had Unlisted, Public and an Explore page; Stage 2-app replaced them; see above.)
   - People who aren't signed in see the bot's card and greeting, plus a sign-up / log-in prompt.
   - Signed-in people chat with the bot in their own private conversations. The creator can't read them.
   - A share link only lets people chat. Only the creator can change the bot. Instructions stay hidden unless the creator turns on **Show instructions**. **New link** replaces the old link.
@@ -77,7 +96,7 @@ You don't need to run it. `shared/schema.ts` still contains older, unused tables
   - With `stream: true` it returns NDJSON lines: `{"type":"delta","text":...}`, then either `{"type":"done","response":...}` or `{"type":"error","error":...,"code":...}`.
   - Errors are `{error, code}`, using codes such as `no_api_key`, `invalid_api_key`, `insufficient_quota`, `rate_limited` and `ai_timeout`.
 - **Appointments.** `GET/POST /appointments`, `PATCH/DELETE /appointments/:id`, and `GET /appointments/reminders`.
-- **Bots.** `GET /bots` (yours), `POST /bots`, `GET /bots/:id` (the full bot for its owner; only the public card for others; 404 if private), `PATCH /bots/:id` and `DELETE /bots/:id` (owner only, `403 not_owner` otherwise), `POST /bots/:id/duplicate`, `POST /bots/:id/new-link`, `GET /bots/explore?q=` (public bots), `GET /bots/options` (allowed models and usage), `POST /bots/draft-instructions` with `{name, description, current?}`, and `GET /usage`.
+- **Bots.** `GET /bots` (yours), `POST /bots`, `GET /bots/:id` (the full bot for its owner; only the public card for others; 404 if private), `PATCH /bots/:id` and `DELETE /bots/:id` (owner only, `403 not_owner` otherwise), `POST /bots/:id/duplicate`, `POST /bots/:id/new-link`, `GET /bots/shared` (bots shared with you), `POST /bots/shared` with `{slug}` (add one from its link), `DELETE /bots/shared/:id` (remove it from your sidebar), `GET /bots/options` (allowed models and usage), `POST /bots/draft-instructions` with `{name, description, current?}`, and `GET /usage`.
   - Limits: name up to 60 characters, description 300, instructions 8000, greeting 500. Pictures must be `https://` links or small uploaded images.
-- **Shared card (no sign-in needed).** `GET /public/bots/:slug` returns the card for unlisted and public bots. It never includes the owner's email, the model or (unless allowed) the instructions.
+- **Shared card (no sign-in needed).** `GET /public/bots/:slug` returns the card for bots shared by link. It never includes the owner's email, the model or (unless allowed) the instructions.
 - **Chatting with a bot.** `POST /conversations` with `{title, botId}`, then `POST /chat` as usual. The bot comes from the conversation. `GET /conversations?botId=<id|bertha>` filters the list. A bot that has been made private or deleted returns `403 bot_unavailable`. With limits on, `429 limit_reached`.

@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
+import { useAppShell } from "@/components/app/AppShell";
 import {
   ArrowLeft, Bell, CalendarDays, CalendarPlus, Clock3,
-  MapPin, Pencil, RotateCw, X, Check, CalendarRange,
+  MapPin, Pencil, RotateCw, X, Check, Menu,
 } from "lucide-react";
 import { format, isSameDay, startOfDay, addMinutes } from "date-fns";
 import { Button } from "@/components/ui/button";
@@ -123,6 +124,7 @@ function formatClock(value: string) {
 }
 
 export default function Appointments() {
+  const shell = useAppShell();
   const queryClient = useQueryClient();
   const today = useMemo(() => startOfDay(new Date()), []);
   const [selectedDay, setSelectedDay] = useState<Date>(today);
@@ -191,16 +193,22 @@ export default function Appointments() {
   };
 
   return (
-    <main className="min-h-[100dvh] bg-[#111416] text-[#edf0eb]">
-      <div aria-hidden="true" className="pointer-events-none fixed inset-0 opacity-[0.16]"
+    <main className="relative h-full overflow-y-auto overscroll-contain bg-[#111416] text-[#edf0eb]" data-testid="appointments-page">
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-[0.16]"
         style={{ backgroundImage: "radial-gradient(ellipse at 80% 0%, rgba(157,185,153,.22), transparent 34%), radial-gradient(ellipse at 0% 95%, rgba(120,143,130,.1), transparent 35%)" }} />
-      <div className="relative mx-auto flex min-h-[100dvh] max-w-[1440px] flex-col px-4 pb-7 sm:px-7 lg:px-10">
+      <div className="relative mx-auto flex min-h-full max-w-[1440px] flex-col px-4 pb-7 sm:px-7 lg:px-10">
         <header className="flex min-h-[72px] flex-wrap items-center justify-between gap-2 border-b border-white/[0.09] py-3">
+          <div className="flex items-center gap-1">
+          {shell && (
+            <button type="button" onClick={shell.openSidebar} className="inline-flex h-9 w-9 items-center justify-center rounded-md text-[#aab2ad] hover:bg-white/[0.06] hover:text-white md:hidden" aria-label="Open sidebar" data-testid="button-open-sidebar">
+              <Menu className="h-5 w-5" />
+            </button>
+          )}
           <Link href="/" className="inline-flex items-center gap-2 rounded-sm text-sm text-[#aab2ad] transition hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#a9c4a4]">
             <ArrowLeft className="h-4 w-4" /> Back to chat
           </Link>
+          </div>
           <nav aria-label="Main navigation" className="flex items-center gap-1 sm:gap-3">
-            <Link href="/dashboard" className="inline-flex items-center gap-2 rounded-md px-2 py-2 text-xs font-medium text-[#aab2ad] transition hover:bg-white/[0.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#a9c4a4]"><CalendarRange className="h-4 w-4" /><span>Conversations</span></Link>
             <span aria-current="page" className="inline-flex items-center gap-2 rounded-md bg-white/[0.06] px-2 py-2 text-xs font-medium text-[#dce7d7]"><CalendarDays className="h-4 w-4" /><span>Appointments</span></span>
           </nav>
         </header>

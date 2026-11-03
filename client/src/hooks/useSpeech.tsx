@@ -250,10 +250,10 @@ export function useSpeech() {
             console.error('Speech synthesis error:', event.error);
             // Chrome refuses to talk until the page has been clicked/tapped at least once.
             toast({
-              title: "Bertha can't speak yet",
+              title: "The reply wasn't spoken",
               description: event.error === 'not-allowed'
-                ? "Your browser blocks sound until you click or tap the page once. Click anywhere in Bertha, and she will speak her next reply."
-                : `Speech output failed (${event.error}). Her reply is shown in the chat.`,
+                ? "Your browser blocks sound until you click or tap the page once. Click anywhere, and the next reply will be spoken."
+                : `Speech output failed (${event.error}). The reply is shown in the chat.`,
               duration: 8000
             });
           }

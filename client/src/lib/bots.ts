@@ -1,5 +1,6 @@
 // Shared client types and helpers for custom bots.
-export type Visibility = "private" | "unlisted" | "public";
+/** private = only the owner; link = anyone signed in who has the /b/<slug> link. */
+export type Visibility = "private" | "link";
 
 /** What every viewer may see about a bot (the share card). */
 export interface PublicBot {
@@ -57,7 +58,7 @@ export interface ChatBot {
   voicePitch: number;
 }
 
-export const BERTHA_AVATAR = "https://images.unsplash.com/photo-1677442136019-21780ecad995?q=80&w=150&h=150&fit=crop";
+export const BERTHA_AVATAR = "/icons/icon-192.png";
 export const BERTHA: ChatBot = {
   id: null, name: "Bertha", greeting: "", avatarEmoji: "", avatarUrl: BERTHA_AVATAR,
   voiceName: null, voiceRate: 1, voicePitch: 1,

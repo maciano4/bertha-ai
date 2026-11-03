@@ -1,228 +1,116 @@
-import { useState, useEffect } from "react";
+// The chat pane: header for whichever bot is open, then the conversation.
+import { useCallback, useEffect, useState } from "react";
+import { Link, useLocation } from "wouter";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Menu, SquarePen, Share2, Settings2, Settings, CalendarDays } from "lucide-react";
 import ChatInterface from "@/components/chat/ChatInterface";
-import CameraPanel from "@/components/panels/CameraPanel";
-import SettingsPanel from "@/components/panels/SettingsPanel";
-import ActivityPanel from "@/components/panels/ActivityPanel";
-import SettingsModal from "@/components/modals/SettingsModal";
-import { Button } from "@/components/ui/button";
-import { Settings, LayoutDashboard, CalendarDays, LogOut, Menu, MessageSquarePlus, Bot as BotIcon, Compass } from "lucide-react";
-import ConversationSidebar, { type ConversationSummary } from "@/components/chat/ConversationSidebar";
-import { useAuth } from "@/hooks/useAuth";
-import { Link } from "wouter";
-import { useQuery } from "@tanstack/react-query";
-import { apiRequest } from "@/lib/queryClient";
+import ShareDialog from "@/components/app/ShareDialog";
+import { useAppShell } from "@/components/app/AppShell";
+import BotAvatar from "@/components/bots/BotAvatar";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { apiErrorInfo } from "@/lib/apiError";
 import { useToast } from "@/hooks/use-toast";
-import BotAvatar from "@/components/bots/BotAvatar";
-import { BERTHA, toChatBot, type ChatBot, type PublicBot } from "@/lib/bots";
+import { BERTHA, toChatBot, type ChatBot, type OwnedBot, type PublicBot } from "@/lib/bots";
+import { useChatNav, type ConversationSummary } from "@/lib/chatNav";
+import { cn } from "@/lib/utils";
 
-const navLink = "inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-foreground/80 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
+function HeaderButton({ label, onClick, href, testId, children }: { label: string; onClick?: () => void; href?: string; testId: string; children: React.ReactNode }) {
+  const className = "inline-flex h-9 w-9 items-center justify-center rounded-lg text-foreground/75 transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {href
+          ? <Link href={href} className={className} aria-label={label} data-testid={testId}>{children}</Link>
+          : <button type="button" onClick={onClick} className={className} aria-label={label} data-testid={testId}>{children}</button>}
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 export default function Home() {
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [customBackground, setCustomBackground] = useState<string | null>(null);
-  const [conversationId, setConversationId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("conversation"));
-  // Which bot answers: null = Bertha. Comes from ?bot=, the bot switcher, or the opened conversation.
-  const [botId, setBotId] = useState<string | null>(() => new URLSearchParams(window.location.search).get("bot"));
-  const [botHint, setBotHint] = useState<ChatBot | null>(null);
+  const nav = useChatNav();
+  const { botId, conversationId } = nav;
+  const shell = useAppShell();
+  const cache = useQueryClient();
+  const [, navigate] = useLocation();
   const { toast } = useToast();
+  const [shareOpen, setShareOpen] = useState(false);
 
-  const conversations = useQuery({
-    queryKey: ["/api/conversations"],
-    queryFn: async (): Promise<ConversationSummary[]> => (await apiRequest("GET", "/api/conversations")).json(),
-  });
+  const conversations = useQuery<ConversationSummary[]>({ queryKey: ["/api/conversations"] });
+  const myBots = useQuery<OwnedBot[]>({ queryKey: ["/api/bots"] });
+  const sharedBots = useQuery<PublicBot[]>({ queryKey: ["/api/bots/shared"] });
   const activeConversation = conversations.data?.find(item => item.id === conversationId);
-  // A reloaded ?conversation= link: follow the bot that conversation belongs to.
+
+  // A ?conversation= link whose bot differs from ?bot=: follow the conversation's bot.
   useEffect(() => {
-    if (activeConversation && (activeConversation.botId ?? null) !== botId) setBotId(activeConversation.botId ?? null);
+    if (activeConversation && (activeConversation.botId ?? null) !== botId) nav.open(activeConversation.botId ?? null, activeConversation.id, true);
   }, [activeConversation?.id, activeConversation?.botId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const botQuery = useQuery({
-    queryKey: ["/api/bots", botId],
-    enabled: !!botId,
-    queryFn: async (): Promise<PublicBot> => (await apiRequest("GET", `/api/bots/${botId}`)).json(),
-  });
+  const botQuery = useQuery<PublicBot>({ queryKey: ["/api/bots", botId], enabled: !!botId, retry: false });
   useEffect(() => {
     if (!botId || !botQuery.error) return;
     const info = apiErrorInfo(botQuery.error);
     if (info.status === 401) return;
     if (!conversationId) {
       toast({ title: "That bot isn't available", description: "Its creator may have stopped sharing it or deleted it. You're chatting with Bertha.", variant: "destructive" });
-      setBotId(null);
-      setBotHint(null);
+      nav.open(null, null, true);
     }
   }, [botQuery.error]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const fallbackName = activeConversation?.botName;
+  const listed = botId ? (myBots.data?.find(bot => bot.id === botId) ?? sharedBots.data?.find(bot => bot.id === botId)) : undefined;
+  const card: PublicBot | undefined = botQuery.data ?? listed;
   const activeBot: ChatBot = !botId
     ? BERTHA
-    : botQuery.data
-    ? toChatBot(botQuery.data)
-    : botHint?.id === botId
-    ? botHint
-    : { ...BERTHA, id: botId, name: fallbackName || "Bot", avatarEmoji: activeConversation?.botAvatarEmoji || "🤖", avatarUrl: activeConversation?.botAvatarUrl || null };
+    : card
+    ? toChatBot(card)
+    : { ...BERTHA, id: botId, name: activeConversation?.botName || "Bot", avatarEmoji: activeConversation?.botAvatarEmoji || "🤖", avatarUrl: activeConversation?.botAvatarUrl || null };
+  const unavailable = !!botId && !!botQuery.error;
+  const isOwner = !!card?.isOwner;
 
-  const selectConversation = (conversation: ConversationSummary | null) => {
-    setConversationId(conversation?.id ?? null);
-    if (conversation) setBotId(conversation.botId ?? null);
-  };
-  const switchBot = (bot: ChatBot) => {
-    setBotHint(bot);
-    if (bot.id !== botId) setConversationId(null);
-    setBotId(bot.id);
-  };
+  const onConversationStart = useCallback((id: string) => {
+    nav.open(botId, id, true);
+    // Chatting with a shared bot adds it to "Shared with me".
+    if (botId) cache.invalidateQueries({ queryKey: ["/api/bots/shared"] });
+  }, [botId, nav, cache]);
 
-  // Load custom background from localStorage
-  useEffect(() => {
-    const savedBackground = localStorage.getItem("bertha-custom-background");
-    if (savedBackground) {
-      setCustomBackground(savedBackground);
-    }
-  }, []);
-
-  const { user, logout } = useAuth();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  // Keep ?conversation= in the address bar so a reload reopens the same chat.
-  useEffect(() => {
-    const url = new URL(window.location.href);
-    if (conversationId) url.searchParams.set("conversation", conversationId);
-    else url.searchParams.delete("conversation");
-    if (botId) url.searchParams.set("bot", botId);
-    else url.searchParams.delete("bot");
-    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
-  }, [conversationId, botId]);
-
-  const handleBackgroundChange = (backgroundUrl: string) => {
-    setCustomBackground(backgroundUrl);
-    localStorage.setItem("bertha-custom-background", backgroundUrl);
-  };
+  const subtitle = !botId
+    ? "Your assistant"
+    : unavailable
+    ? "No longer available. You can still read this chat."
+    : card?.description || (card?.creatorName && !isOwner ? `by ${card.creatorName}` : isOwner ? "Your bot" : "Shared with you");
 
   return (
-    <div className="chat-background min-h-screen relative">
-      {/* Custom Background Overlay */}
-      {customBackground && (
-        <div 
-          className="fixed inset-0 opacity-30 pointer-events-none custom-background"
-          style={{ backgroundImage: `url(${customBackground})` }}
-        />
+    <div className="relative flex h-full min-h-0 flex-col chat-background" data-testid="chat-pane">
+      {shell?.background && (
+        <div className="custom-background pointer-events-none absolute inset-0 opacity-[0.12]" style={{ backgroundImage: `url(${shell.background})` }} aria-hidden="true" />
       )}
-      
-      {/* Default Technology Background */}
-      {!customBackground && (
-        <div 
-          className="fixed inset-0 opacity-20 pointer-events-none"
-          style={{ 
-            backgroundImage: "url('https://images.unsplash.com/photo-1518709268805-4e9042af2176?q=80&w=1000')",
-            backgroundSize: "cover",
-            backgroundPosition: "center"
-          }}
-        />
-      )}
-
-      {/* Main Chat Interface */}
-      <div className="relative z-10 flex h-screen">
-        <ConversationSidebar
-          activeId={conversationId}
-          activeBot={activeBot}
-          onSelect={selectConversation}
-          onSwitchBot={switchBot}
-          open={sidebarOpen}
-          onClose={() => setSidebarOpen(false)}
-        />
-
-        {/* Chat Container */}
-        <div className="flex-1 min-w-0 flex flex-col lg:mr-80">
-          {/* Header */}
-          <header className="blur-backdrop border-b border-border p-4 flex flex-wrap gap-3 items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSidebarOpen(true)} aria-label="Show your chats" data-testid="button-open-sidebar">
-                <Menu className="h-5 w-5" />
-              </Button>
-              {/* Avatar of whoever is answering (Bertha or a custom bot) */}
-              <div className="relative">
-                <BotAvatar emoji={activeBot.avatarEmoji} url={activeBot.avatarUrl} name={activeBot.name}
-                  className="w-12 h-12 border-2 border-primary shadow-lg text-2xl" />
-                <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-accent rounded-full border-2 border-white dark:border-black"></div>
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-foreground" data-testid="text-active-bot">{activeBot.id ? activeBot.name : "Bertha AI"}</h1>
-                <p className="text-sm text-muted-foreground truncate max-w-[14rem]" data-testid="text-signed-in">
-                  {user ? `Signed in as ${user.displayName || user.email}` : "Intelligent Assistant"}
-                </p>
-              </div>
-            </div>
-            <div className="flex flex-wrap items-center gap-1 sm:gap-2">
-              <Link href="/bots" className={navLink} aria-label="My bots" data-testid="link-my-bots">
-                <BotIcon className="h-4 w-4" />
-                <span className="hidden sm:inline">My Bots</span>
-              </Link>
-              <Link href="/explore" className={navLink} aria-label="Explore bots" data-testid="link-explore">
-                <Compass className="h-4 w-4" />
-                <span className="hidden sm:inline">Explore</span>
-              </Link>
-              <Link href="/appointments" className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-foreground/80 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" aria-label="Open appointments">
-                <CalendarDays className="h-4 w-4" />
-                <span className="hidden sm:inline">Appointments</span>
-              </Link>
-              <Link href="/dashboard" className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium text-foreground/80 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" aria-label="Open conversation dashboard">
-                <LayoutDashboard className="h-4 w-4" />
-                <span className="hidden sm:inline">Dashboard</span>
-              </Link>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setIsSettingsOpen(true)}
-                data-testid="button-settings"
-              >
-                <Settings className="h-5 w-5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setConversationId(null)}
-                aria-label="New chat"
-                title="New chat"
-                data-testid="button-clear"
-              >
-                <MessageSquarePlus className="h-5 w-5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => logout()}
-                aria-label="Log out"
-                title="Log out"
-                data-testid="button-logout"
-              >
-                <LogOut className="h-5 w-5" />
-              </Button>
-            </div>
-          </header>
-
-          {/* Chat Interface */}
-          <ChatInterface
-            key={activeBot.id ?? "bertha"}
-            bot={activeBot}
-            conversationId={conversationId}
-            onConversationStart={setConversationId}
-          />
+      <header className="relative z-10 flex items-center gap-2 border-b border-border/70 bg-background/70 px-2 py-2 backdrop-blur-xl sm:px-4"
+        style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}>
+        <button type="button" onClick={shell?.openSidebar} className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-foreground/80 hover:bg-accent md:hidden" aria-label="Open sidebar" data-testid="button-open-sidebar">
+          <Menu className="h-5 w-5" />
+        </button>
+        <BotAvatar emoji={activeBot.avatarEmoji} url={activeBot.avatarUrl} name={activeBot.name} className="h-9 w-9 text-xl ring-1 ring-border" />
+        <div className="min-w-0 flex-1">
+          <h1 className="truncate text-[15px] font-semibold leading-tight text-foreground" data-testid="text-active-bot">{activeBot.name}</h1>
+          <p className={cn("truncate text-xs text-muted-foreground", unavailable && "text-destructive/80")} data-testid="text-bot-subtitle">{subtitle}</p>
         </div>
-
-        {/* Desktop Floating Panels */}
-        <div className="floating-panels hidden lg:block">
-          <CameraPanel />
-          <SettingsPanel onBackgroundChange={handleBackgroundChange} />
-          <ActivityPanel />
+        <div className="flex shrink-0 items-center gap-0.5">
+          <HeaderButton label="New chat" onClick={() => nav.open(botId, null)} testId="button-clear"><SquarePen className="h-[18px] w-[18px]" /></HeaderButton>
+          {!botId && <HeaderButton label="Appointments" href="/appointments" testId="button-appointments"><CalendarDays className="h-[18px] w-[18px]" /></HeaderButton>}
+          {card && !unavailable && (card.isOwner || card.visibility !== "private") && (
+            <HeaderButton label="Share" onClick={() => setShareOpen(true)} testId="button-share"><Share2 className="h-[18px] w-[18px]" /></HeaderButton>
+          )}
+          {!botId && <HeaderButton label="Voice and settings" onClick={shell?.openSettings} testId="button-chat-settings"><Settings2 className="h-[18px] w-[18px]" /></HeaderButton>}
+          {isOwner && <HeaderButton label="Bot settings" href={`/bots/${botId}/edit`} testId="button-bot-settings"><Settings className="h-[18px] w-[18px]" /></HeaderButton>}
         </div>
+      </header>
+
+      <div className="relative z-0 flex min-h-0 flex-1 flex-col">
+        <ChatInterface key={activeBot.id ?? "bertha"} bot={activeBot} conversationId={conversationId} onConversationStart={onConversationStart} />
       </div>
 
-      {/* Settings Modal */}
-      <SettingsModal 
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        onBackgroundChange={handleBackgroundChange}
-      />
+      {card && <ShareDialog bot={card} open={shareOpen} onOpenChange={setShareOpen} onRemoved={() => navigate("/")} />}
     </div>
   );
 }

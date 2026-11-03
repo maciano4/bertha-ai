@@ -226,15 +226,21 @@ export const berthaBots = pgTable("bertha_bots", {
   voiceRate: real("voice_rate").notNull().default(1),
   voicePitch: real("voice_pitch").notNull().default(1),
   model: text("model"),
-  visibility: text("visibility").notNull().default("private"),
+  visibility: text("visibility").notNull().default("private"), // "private" | "link"
   slug: text("slug").notNull().unique("bertha_bots_slug_unique"),
   showInstructions: boolean("show_instructions").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, table => [
   index("bertha_bots_owner_updated").on(table.ownerId, table.updatedAt),
-  index("bertha_bots_visibility_updated").on(table.visibility, table.updatedAt),
 ]);
+
+// Bots someone opened from a share link: their "Shared with me" list.
+export const berthaBotShares = pgTable("bertha_bot_shares", {
+  userId: text("user_id").notNull().references(() => berthaUsers.id, { onDelete: "cascade" }),
+  botId: text("bot_id").notNull().references(() => berthaBots.id, { onDelete: "cascade" }),
+  addedAt: timestamp("added_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [primaryKey({ columns: [table.userId, table.botId], name: "bertha_bot_shares_pk" })]);
 
 // Per-user daily counters: groundwork for plan limits (Stage 3 / Stripe).
 export const berthaUsageDaily = pgTable("bertha_usage_daily", {

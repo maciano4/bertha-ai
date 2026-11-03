@@ -5,12 +5,15 @@ import { pool } from "./db";
 import { AIError, CHAT_MODEL, draftBotInstructions } from "./openai";
 import { assertCanCreateBot, LimitError, usageSummary } from "./limits";
 
-// Custom bots. Owners see and edit everything. Everyone else (only for public or unlisted bots)
-// gets the sanitized PublicBot card: no owner id or email, no model, and no instructions unless
+// Custom bots. Owners see and edit everything. Everyone else
+// gets the sanitized PublicBot card (link-shared bots only): no owner id or email, no model, and no instructions unless
 // the owner turned on "show instructions".
 
-export const VISIBILITIES = ["private", "unlisted", "public"] as const;
+// "link" = anyone with the /b/<slug> link can chat. (Older clients may still send "unlisted" or
+// "public"; both mean "link" now that there is no public directory.)
+export const VISIBILITIES = ["private", "link"] as const;
 export type Visibility = typeof VISIBILITIES[number];
+const visibilityInput = z.enum(["private", "link", "unlisted", "public"]).transform((v): Visibility => v === "private" ? "private" : "link");
 
 export interface OwnedBot {
   id: string; ownerId: string; name: string; description: string; instructions: string; greeting: string;
@@ -67,7 +70,7 @@ const botFields = {
   voicePitch: z.coerce.number().min(0).max(2),
   model: z.string().trim().max(60).nullable().transform(v => v || null)
     .refine(v => !v || allowedModels().includes(v), "That AI model isn't available. Pick one from the list or use the default."),
-  visibility: z.enum(VISIBILITIES),
+  visibility: visibilityInput,
   showInstructions: z.boolean(),
 };
 export const createBotInput = z.object({
@@ -111,7 +114,7 @@ export async function getBotBySlug(slug: string) {
   return result.rows[0] ? plain(result.rows[0]) as OwnedBot & { creatorName: string | null } : null;
 }
 
-/** A bot can be chatted with by its owner, or by anyone signed in when it is public or unlisted. */
+/** A bot can be chatted with by its owner, or by anyone signed in when it is shared by link. */
 export function canChatWith(bot: OwnedBot | null, userId: string) {
   return !!bot && (bot.ownerId === userId || bot.visibility !== "private");
 }
@@ -129,15 +132,20 @@ export async function listOwnBots(ownerId: string): Promise<(OwnedBot & { chatCo
   return plain(result.rows);
 }
 
-export async function listPublicBots(query: string, limit = 60) {
-  const q = query.trim().slice(0, 80);
+/** Remembers that a user opened someone else's bot, so it shows under "Shared with me". */
+export async function rememberSharedBot(userId: string, bot: OwnedBot) {
+  if (bot.ownerId === userId || bot.visibility === "private") return;
+  await pool.query(`INSERT INTO bertha_bot_shares (user_id, bot_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, [userId, bot.id]);
+}
+
+/** The "Shared with me" list: bots still shared by link, newest first. */
+export async function listSharedBots(userId: string) {
   const result = await pool.query(
-    `SELECT ${columns}, u.display_name AS "creatorName",
-       (SELECT count(*)::int FROM bertha_conversations c WHERE c.bot_id = b.id) AS "chatCount"
-     FROM bertha_bots b JOIN bertha_users u ON u.id = b.owner_id
-     WHERE b.visibility = 'public' AND ($1 = '' OR b.name ILIKE '%' || $1 || '%' OR b.description ILIKE '%' || $1 || '%')
-     ORDER BY "chatCount" DESC, b.updated_at DESC LIMIT $2`, [q.replace(/[%_\\]/g, ""), limit]);
-  return plain(result.rows) as (OwnedBot & { creatorName: string | null; chatCount: number })[];
+    `SELECT ${columns}, u.display_name AS "creatorName", s.added_at AS "addedAt"
+     FROM bertha_bot_shares s JOIN bertha_bots b ON b.id = s.bot_id JOIN bertha_users u ON u.id = b.owner_id
+     WHERE s.user_id = $1 AND b.owner_id <> $1 AND b.visibility <> 'private'
+     ORDER BY s.added_at DESC LIMIT 200`, [userId]);
+  return plain(result.rows) as (OwnedBot & { creatorName: string | null })[];
 }
 
 async function insertBot(ownerId: string, data: z.infer<typeof createBotInput>): Promise<OwnedBot> {
@@ -216,11 +224,30 @@ export function registerBotRoutes(app: Express) {
     catch (error) { fail(res, error, "Could not load usage."); }
   });
 
-  app.get("/api/bots/explore", async (req, res) => {
+  // "Shared with me": bots you opened from someone's share link.
+  app.get("/api/bots/shared", async (req, res) => {
+    try { res.json((await listSharedBots(req.user!.id)).map(bot => toPublicBot(bot, req.user!.id))); }
+    catch (error) { fail(res, error, "Could not load bots shared with you."); }
+  });
+
+  // Opening a share link while signed in adds the bot to your sidebar.
+  app.post("/api/bots/shared", async (req, res) => {
+    const slug = typeof req.body?.slug === "string" ? req.body.slug.trim().slice(0, 120) : "";
+    if (!slug) return res.status(400).json({ error: "Missing share link.", code: "invalid_input" });
     try {
-      const bots = await listPublicBots(typeof req.query.q === "string" ? req.query.q : "");
-      res.json(bots.map(bot => toPublicBot(bot, req.user!.id)));
-    } catch (error) { fail(res, error, "Could not load public bots."); }
+      const bot = await getBotBySlug(slug);
+      if (!bot || !canChatWith(bot, req.user!.id)) return notFound(res);
+      await rememberSharedBot(req.user!.id, bot);
+      res.json(toPublicBot(bot, req.user!.id));
+    } catch (error) { fail(res, error, "Could not add that bot."); }
+  });
+
+  // Removes a shared bot from your sidebar (your chats with it stay until you delete them).
+  app.delete("/api/bots/shared/:id", async (req, res) => {
+    try {
+      await pool.query(`DELETE FROM bertha_bot_shares WHERE user_id = $1 AND bot_id = $2`, [req.user!.id, param(req, "id")]);
+      res.json({ success: true });
+    } catch (error) { fail(res, error, "Could not remove that bot."); }
   });
 
   app.post("/api/bots/draft-instructions", async (req, res) => {
@@ -234,7 +261,7 @@ export function registerBotRoutes(app: Express) {
     catch (error) { fail(res, error, "Could not write instructions."); }
   });
 
-  // Owners get the full bot; others get the public card for public/unlisted bots; private = 404.
+  // Owners get the full bot; others get the share card for link-shared bots; private = 404.
   app.get("/api/bots/:id", async (req, res) => {
     try {
       const bot = await getBotById(param(req, "id"));

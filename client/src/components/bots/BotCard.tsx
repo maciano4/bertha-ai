@@ -4,10 +4,10 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { Visibility } from "@/lib/bots";
 
-const visibilityLabel: Record<Visibility, string> = { private: "Private", unlisted: "Unlisted (link only)", public: "Public" };
+const visibilityLabel: Record<Visibility, string> = { private: "Private", link: "Anyone with the link" };
 
 export function VisibilityBadge({ visibility }: { visibility: Visibility }) {
-  return <Badge variant={visibility === "public" ? "default" : "secondary"} data-testid="badge-visibility">{visibilityLabel[visibility]}</Badge>;
+  return <Badge variant={visibility === "link" ? "default" : "secondary"} data-testid="badge-visibility">{visibilityLabel[visibility] ?? "Anyone with the link"}</Badge>;
 }
 
 export default function BotCard({ name, description, avatarEmoji, avatarUrl, creatorName, visibility, footer, className, children }: {

@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useParams } from "wouter";
 import { MessageCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -7,9 +7,11 @@ import BotCard from "@/components/bots/BotCard";
 import BotAvatar from "@/components/bots/BotAvatar";
 import AuthPage from "@/pages/auth";
 import { useAuth } from "@/hooks/useAuth";
+import { apiRequest } from "@/lib/queryClient";
 import type { PublicBot } from "@/lib/bots";
 
-// /b/<slug>: a shared bot's card. Signed-in people can start chatting; visitors are asked to sign up.
+// /b/<slug>: a shared bot's link. Signed in, the bot is added to your "Shared with me" list and
+// its chat opens. Signed out, you see its card and are asked to sign up or log in first.
 export default function BotSharePage() {
   const { slug } = useParams<{ slug: string }>();
   const { user } = useAuth();
@@ -25,13 +27,36 @@ export default function BotSharePage() {
     },
   });
 
+  const cache = useQueryClient();
+  const [addFailed, setAddFailed] = useState(false);
+  const botData = bot.data;
+  useEffect(() => {
+    if (!user || !botData) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!botData.isOwner) await apiRequest("POST", "/api/bots/shared", { slug });
+        if (cancelled) return;
+        await cache.invalidateQueries({ queryKey: ["/api/bots/shared"] });
+        navigate(`/?bot=${botData.id}`, { replace: true });
+      } catch {
+        if (!cancelled) setAddFailed(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, botData?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (user && botData && !addFailed) {
+    return <div className="flex h-full items-center justify-center text-sm text-muted-foreground" role="status" data-testid="share-opening">Opening {botData.name}...</div>;
+  }
+
   return (
-    <main className="chat-background min-h-screen px-4 py-10">
+    <main className={user ? "h-full overflow-y-auto px-4 py-10" : "chat-background min-h-[100dvh] px-4 py-10"}>
       <div className="mx-auto max-w-md space-y-5">
         {bot.isLoading && <p className="text-center text-muted-foreground" role="status">Loading...</p>}
         {bot.error && <p role="alert" className="text-center text-destructive">This page could not be loaded. Reload to try again.</p>}
         {bot.data === null && (
-          <div className="rounded-2xl border border-border bg-background/90 p-6 text-center" data-testid="share-not-found">
+          <div className="rounded-2xl border border-border bg-card/80 p-6 text-center" data-testid="share-not-found">
             <h1 className="text-xl font-semibold">This bot isn't available</h1>
             <p className="mt-1 text-sm text-muted-foreground">The link may be wrong, or its creator stopped sharing it.</p>
             <Button className="mt-4" onClick={() => navigate("/")}>{user ? "Back to chat" : "Go to Bertha AI"}</Button>

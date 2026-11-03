@@ -37,7 +37,7 @@ export default function AuthPage({ initialMode = "login", embedded = false, sign
       <div className="w-full max-w-sm rounded-2xl border border-border bg-background/95 p-6 shadow-xl">
         <div className="mb-6 flex flex-col items-center text-center">
           <img
-            src="https://images.unsplash.com/photo-1677442136019-21780ecad995?q=80&w=150&h=150&fit=crop"
+            src="/icons/icon-192.png"
             alt="Bertha AI"
             className="mb-3 h-16 w-16 rounded-full border-2 border-primary object-cover shadow"
           />

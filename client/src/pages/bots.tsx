@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useLocation } from "wouter";
-import { Copy, Link2, MessageCircle, Pencil, Plus, Trash2, Compass } from "lucide-react";
+import { useLocation } from "wouter";
+import { Copy, Link2, MessageCircle, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -62,7 +62,6 @@ export default function BotsPage() {
     <PageShell
       title="My Bots"
       actions={<>
-        <Link href="/explore" className="inline-flex h-9 items-center gap-2 rounded-md px-3 text-sm font-medium hover:bg-foreground/10"><Compass className="h-4 w-4" /> Explore</Link>
         <Button onClick={() => navigate("/bots/new")} data-testid="button-create-bot"><Plus className="mr-2 h-4 w-4" /> Create a bot</Button>
       </>}
     >
@@ -76,7 +75,7 @@ export default function BotsPage() {
       {bots.error && <p role="alert" className="text-destructive">Your bots could not be loaded. Reload to try again.</p>}
 
       {bots.data?.length === 0 && (
-        <div className="rounded-2xl border border-dashed border-border bg-background/80 p-8 text-center" data-testid="bots-empty">
+        <div className="rounded-2xl border border-dashed border-border bg-card/40 p-8 text-center" data-testid="bots-empty">
           <h2 className="text-lg font-semibold">Make your first bot</h2>
           <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
             Give it a name, a personality and a voice. Keep it to yourself, or share a link so friends and customers can chat with it.

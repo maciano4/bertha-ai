@@ -1,17 +1,16 @@
-import { Switch, Route, useLocation } from "wouter";
+import { Switch, Route, Redirect, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Home from "@/pages/home";
-import Dashboard from "@/pages/dashboard";
 import Appointments from "@/pages/appointments";
 import AuthPage from "@/pages/auth";
 import NotFound from "@/pages/not-found";
 import BotsPage from "@/pages/bots";
 import BotEditor from "@/pages/bot-editor";
-import ExplorePage from "@/pages/explore";
 import BotSharePage from "@/pages/bot-share";
+import AppShell from "@/components/app/AppShell";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 
@@ -19,43 +18,51 @@ function Router() {
   return (
     <Switch>
       <Route path="/" component={Home} />
-      <Route path="/dashboard" component={Dashboard} />
       <Route path="/appointments" component={Appointments} />
       <Route path="/bots" component={BotsPage} />
       <Route path="/bots/new" component={BotEditor} />
       <Route path="/bots/:id/edit" component={BotEditor} />
-      <Route path="/explore" component={ExplorePage} />
       <Route path="/b/:slug" component={BotSharePage} />
+      {/* Old pages folded into the app: the dashboard is the sidebar now, Explore is gone. */}
+      <Route path="/dashboard"><Redirect to="/" replace /></Route>
+      <Route path="/explore"><Redirect to="/" replace /></Route>
+      <Route path="/login"><Redirect to="/" replace /></Route>
+      <Route path="/signup"><Redirect to="/" replace /></Route>
       <Route component={NotFound} />
     </Switch>
   );
 }
 
+const Splash = ({ children }: { children: React.ReactNode }) => (
+  <div className="flex h-[100dvh] flex-col items-center justify-center gap-3 bg-background p-4 text-center text-muted-foreground">
+    <img src="/icons/icon-192.png" alt="" className="h-14 w-14 rounded-2xl" />
+    {children}
+  </div>
+);
+
 // Everything in the app needs an account; show login/sign-up until there is one.
 function AuthGate() {
   const { user, isLoading, loadError } = useAuth();
   const [location] = useLocation();
-  if (isLoading) {
-    return <div className="chat-background flex min-h-screen items-center justify-center text-muted-foreground" role="status">Loading Bertha...</div>;
-  }
+  if (isLoading) return <Splash><span role="status">Loading Bertha...</span></Splash>;
   if (loadError) {
     return (
-      <div className="chat-background flex min-h-screen flex-col items-center justify-center gap-3 p-4 text-center" role="alert">
-        <p className="text-foreground">{loadError}</p>
+      <Splash>
+        <p className="text-foreground" role="alert">{loadError}</p>
         <Button onClick={() => window.location.reload()}>Reload</Button>
-      </div>
+      </Splash>
     );
   }
   // A shared bot's card is visible signed out, with a sign-up prompt.
-  if (!user && location.startsWith("/b/")) return <Router />;
+  if (!user && location.startsWith("/b/")) return <Route path="/b/:slug" component={BotSharePage} />;
   if (!user) return <AuthPage initialMode={window.location.pathname === "/signup" ? "signup" : "login"} />;
-  return <Router />;
+  return <AppShell><Router /></AppShell>;
 }
 
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
+      <TooltipProvider delayDuration={300}>
         <AuthProvider>
           <Toaster />
           <AuthGate />
