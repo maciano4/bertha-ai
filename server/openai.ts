@@ -8,7 +8,68 @@ export function openAIKey() {
 export const CHAT_MODEL = (process.env.OPENAI_MODEL || "gpt-4o-mini").trim();
 const isReasoningModel = (model: string) => /^(o\d|gpt-5)/i.test(model);
 
-const openai = new OpenAI({ apiKey: openAIKey() || "missing-openai-key", timeout: 60_000, maxRetries: 1 });
+import { classifyAIError, isRetryable, retryDelayMs, logAIError, type AIErrorKind } from "./aiErrors";
+
+// Providers, tried in order. OpenAI is the default; an optional OpenAI-compatible fallback
+// (OpenRouter, Groq or any AI_FALLBACK_BASE_URL) is used when OpenAI is out of credits,
+// rate-limited, rejecting the key or down.
+interface Provider { name: string; client: OpenAI; model?: string; billingHint: string }
+const TIMEOUT = 60_000;
+function buildProviders(): Provider[] {
+  const list: Provider[] = [];
+  if (openAIKey()) {
+    list.push({
+      name: "OpenAI",
+      client: new OpenAI({ apiKey: openAIKey(), baseURL: (process.env.OPENAI_BASE_URL || "").trim() || undefined, timeout: TIMEOUT, maxRetries: 0 }),
+      billingHint: "add credits at platform.openai.com/settings/organization/billing",
+    });
+  }
+  const env = (name: string) => (process.env[name] || "").trim();
+  if (env("AI_FALLBACK_API_KEY") && env("AI_FALLBACK_BASE_URL")) {
+    list.push({ name: env("AI_FALLBACK_NAME") || "the fallback AI provider", client: new OpenAI({ apiKey: env("AI_FALLBACK_API_KEY"), baseURL: env("AI_FALLBACK_BASE_URL"), timeout: TIMEOUT, maxRetries: 0 }), model: env("AI_FALLBACK_MODEL") || undefined, billingHint: "add credits with that provider" });
+  } else if (env("OPENROUTER_API_KEY")) {
+    list.push({ name: "OpenRouter", client: new OpenAI({ apiKey: env("OPENROUTER_API_KEY"), baseURL: env("OPENROUTER_BASE_URL") || "https://openrouter.ai/api/v1", timeout: TIMEOUT, maxRetries: 0 }), model: env("OPENROUTER_MODEL") || "openai/gpt-4o-mini", billingHint: "add credits at openrouter.ai/settings/credits" });
+  } else if (env("GROQ_API_KEY")) {
+    list.push({ name: "Groq", client: new OpenAI({ apiKey: env("GROQ_API_KEY"), baseURL: env("GROQ_BASE_URL") || "https://api.groq.com/openai/v1", timeout: TIMEOUT, maxRetries: 0 }), model: env("GROQ_MODEL") || "llama-3.3-70b-versatile", billingHint: "check your plan at console.groq.com" });
+  }
+  return list;
+}
+const providers = buildProviders();
+export const hasAIProvider = () => providers.length > 0;
+export const aiProviderNames = () => providers.map(p => p.name);
+const MAX_RETRIES = Math.max(0, Math.min(5, Number(process.env.AI_MAX_RETRIES ?? 3) || 0));
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Runs one AI request: retries rate limits / 5xx / dropped connections with backoff (honouring
+// retry-after), then moves to the fallback provider if there is one. Throws an AIError.
+async function callAI<T>(where: string, model: string, run: (client: OpenAI, model: string) => Promise<T>): Promise<T> {
+  if (!providers.length) throw toAIError(new Error("missing key"));
+  let lastError: unknown;
+  let lastProvider = providers[0];
+  let lastModel = model;
+  for (const provider of providers) {
+    const useModel = provider === providers[0] ? model : (provider.model || model);
+    lastProvider = provider; lastModel = useModel;
+    let waited = 0;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await run(provider.client, useModel);
+      } catch (error) {
+        lastError = error;
+        const kind = classifyAIError(error);
+        const canRetry = isRetryable(kind) && attempt < MAX_RETRIES && waited < 15_000;
+        const delay = canRetry ? retryDelayMs(error, attempt) : 0;
+        logAIError(where, provider.name, error, `model=${useModel} attempt=${attempt + 1}${canRetry ? ` retrying in ${delay}ms` : ""}`);
+        if (!canRetry) break;
+        waited += delay;
+        await sleep(delay);
+      }
+    }
+    const kind = classifyAIError(lastError);
+    if (kind === "context_too_long") break; // another provider won't help
+  }
+  throw toAIError(lastError, lastModel, lastProvider);
+}
 
 export interface ChatResponse {
   content: string;
@@ -23,21 +84,45 @@ export class AIError extends Error {
   constructor(message: string, public status: number, public code: string) { super(message); }
 }
 
-export function toAIError(error: unknown, model: string = CHAT_MODEL): AIError {
-  if (error instanceof AIError) return error;
-  const e = error as any;
-  const status: number | undefined = e?.status;
-  const code: string = e?.code || e?.error?.code || e?.type || "";
-  if (!openAIKey()) return new AIError("Bertha's AI isn't set up yet: the OPENAI_API_KEY secret is missing. Add it in Replit Secrets and restart.", 503, "no_api_key");
-  if (status === 401) return new AIError("Bertha can't reach her AI because the OpenAI API key was rejected. Check the OPENAI_API_KEY secret in Replit and restart.", 503, "invalid_api_key");
-  if (status === 429 && /insufficient_quota/.test(code + " " + (e?.message || ""))) {
-    return new AIError("The AI can't answer right now because the OpenAI account is out of credits. Add credits at platform.openai.com (Settings → Billing), then try again.", 503, "insufficient_quota");
+export function aiErrorFor(kind: AIErrorKind, model: string = CHAT_MODEL, provider?: Pick<Provider, "name" | "billingHint">): AIError {
+  const name = provider?.name || "OpenAI";
+  const isOpenAI = name === "OpenAI";
+  switch (kind) {
+    case "out_of_credits":
+      return new AIError(isOpenAI
+        ? "Bertha's AI account is out of credits; add credits at platform.openai.com/settings/organization/billing"
+        : `Bertha's AI account (${name}) is out of credits; ${provider?.billingHint || "add credits with that provider"}`, 503, "insufficient_quota");
+    case "invalid_api_key":
+      return new AIError(isOpenAI
+        ? "Bertha can't reach her AI because the OpenAI API key was rejected. Check the OPENAI_API_KEY secret in Replit and restart."
+        : `Bertha can't reach her AI because the ${name} API key was rejected. Check that secret in Replit and restart.`, 503, "invalid_api_key");
+    case "rate_limited":
+      return new AIError("The AI is getting too many requests right now (I tried again a few times). Please wait a minute and try again.", 429, "rate_limited");
+    case "model_not_found":
+      return new AIError(`The AI model "${model}" isn't available on this ${name} account. ${model === CHAT_MODEL ? "Set OPENAI_MODEL to a model you have access to (for example gpt-4o-mini)." : "Edit the bot and pick another model, or leave the model on the default."}`, 503, "model_not_found");
+    case "context_too_long":
+      return new AIError("That conversation has grown too long for the AI. Please start a new chat.", 400, "context_too_long");
+    case "timeout":
+      return new AIError("The AI took too long to answer. Please try again.", 504, "ai_timeout");
+    case "connection":
+      return new AIError(`Bertha couldn't connect to ${name}. Please try again in a moment.`, 503, "ai_unreachable");
+    case "server_error":
+      return new AIError(`${name} is having problems right now. Please try again in a moment.`, 503, "ai_server_error");
+    default:
+      return new AIError("The AI is unavailable right now. Please try again in a moment.", 503, "ai_unavailable");
   }
-  if (status === 429) return new AIError("The AI is getting too many requests right now. Please wait a few seconds and try again.", 429, "rate_limited");
-  if (status === 404 || code === "model_not_found") return new AIError(`The AI model "${model}" isn't available on this OpenAI account. ${model === CHAT_MODEL ? "Set OPENAI_MODEL to a model you have access to (for example gpt-4o-mini)." : "Edit the bot and pick another model, or leave the model on the default."}`, 503, "model_not_found");
-  if (status === 400 && /context_length|maximum context/i.test(e?.message || "")) return new AIError("That conversation has grown too long for the AI. Please start a new chat.", 400, "context_too_long");
-  if (e?.name === "APIConnectionTimeoutError" || /timed? ?out/i.test(e?.message || "")) return new AIError("The AI took too long to answer. Please try again.", 504, "ai_timeout");
-  return new AIError(`The AI is unavailable right now${status ? ` (OpenAI error ${status}${code ? ` ${code}` : ""})` : ""}. Please try again in a moment.`, 503, "ai_unavailable");
+}
+
+export function toAIError(error: unknown, model: string = CHAT_MODEL, provider?: Pick<Provider, "name" | "billingHint">): AIError {
+  if (error instanceof AIError) return error;
+  if (!providers.length) return new AIError("Bertha's AI isn't set up yet: the OPENAI_API_KEY secret is missing. Add it in Replit Secrets and restart.", 503, "no_api_key");
+  const kind = classifyAIError(error);
+  const e = aiErrorFor(kind, model, provider);
+  if (kind === "other") {
+    const status = (error as any)?.status;
+    if (status) e.message = `The AI is unavailable right now (error ${status}). Please try again in a moment.`;
+  }
+  return e;
 }
 
 // A custom bot. Absent = the built-in Bertha persona.
@@ -176,15 +261,11 @@ async function nlpFor(userInput: string, history: Array<{ role: string; content:
 // Starts a streamed answer. Any OpenAI error (bad key, no credits...) is thrown as an AIError
 // BEFORE the first token, so the route can still answer with a clean JSON error.
 export async function streamChatResponse(userInput: string, history: Array<{ role: string; content: string }>, ctx: ChatContext): Promise<AsyncIterable<string>> {
-  if (!openAIKey()) throw toAIError(new Error("missing key"));
+  if (!hasAIProvider()) throw toAIError(new Error("missing key"));
   const nlpAnalysis = ctx.nlpAnalysis ?? await nlpFor(userInput, history).catch(() => undefined);
-  let stream: AsyncIterable<any>;
-  try {
-    stream = await openai.chat.completions.create({ ...requestOptions(modelFor(ctx)), messages: buildMessages(userInput, history, { ...ctx, nlpAnalysis }), stream: true });
-  } catch (error) {
-    console.error("OpenAI API error:", (error as any)?.status, (error as any)?.code || (error as any)?.message);
-    throw toAIError(error, modelFor(ctx));
-  }
+  const messages = buildMessages(userInput, history, { ...ctx, nlpAnalysis });
+  const stream: AsyncIterable<any> = await callAI("chat", modelFor(ctx), (client, model) =>
+    client.chat.completions.create({ ...requestOptions(model), messages, stream: true }) as any);
   return (async function* () {
     try {
       for await (const chunk of stream) {
@@ -192,7 +273,7 @@ export async function streamChatResponse(userInput: string, history: Array<{ rol
         if (text) yield text as string;
       }
     } catch (error) {
-      console.error("OpenAI stream error:", error);
+      logAIError("chat stream", "AI", error);
       throw toAIError(error, modelFor(ctx));
     }
   })();
@@ -204,25 +285,23 @@ export async function generateChatResponse(
   ctxOrLanguage: ChatContext | string = {},
 ): Promise<ChatResponse> {
   const ctx: ChatContext = typeof ctxOrLanguage === "string" ? { language: ctxOrLanguage } : ctxOrLanguage;
-  if (!openAIKey()) throw toAIError(new Error("missing key"));
-  try {
+  if (!hasAIProvider()) throw toAIError(new Error("missing key"));
+  {
     const nlpAnalysis = ctx.nlpAnalysis ?? await nlpFor(userInput, conversationHistory).catch(() => undefined);
-    const response = await openai.chat.completions.create({ ...requestOptions(modelFor(ctx)), messages: buildMessages(userInput, conversationHistory, { ...ctx, nlpAnalysis }) });
+    const messages = buildMessages(userInput, conversationHistory, { ...ctx, nlpAnalysis });
+    const response = await callAI("chat", modelFor(ctx), (client, model) => client.chat.completions.create({ ...requestOptions(model), messages }));
     const content = response.choices[0]?.message?.content?.trim() || (ctx.bot ? "Sorry, I couldn't put an answer together. Please ask me again." : "I'm sorry, dear, I couldn't put an answer together. Please ask me again.");
     return { content, searchUsed: false, translationUsed: (ctx.language || "en") !== "en", nlpAnalysis };
-  } catch (error) {
-    console.error("OpenAI API error:", (error as any)?.status, (error as any)?.code || (error as any)?.message);
-    throw toAIError(error, modelFor(ctx));
   }
 }
 
 // "AI, help me write instructions": turns a short description into a bot's system instructions.
 export async function draftBotInstructions(input: { name: string; description: string; current?: string }): Promise<string> {
-  if (!openAIKey()) throw toAIError(new Error("missing key"));
+  if (!hasAIProvider()) throw toAIError(new Error("missing key"));
   const model = (process.env.OPENAI_BOT_BUILDER_MODEL || CHAT_MODEL).trim();
-  try {
-    const response = await openai.chat.completions.create({
-      ...requestOptions(model),
+  {
+    const response = await callAI("draft instructions", model, (client, useModel) => client.chat.completions.create({
+      ...requestOptions(useModel),
       messages: [
         {
           role: "system",
@@ -233,13 +312,10 @@ export async function draftBotInstructions(input: { name: string; description: s
           content: `Bot name: ${input.name || "(not named yet)"}\nWhat the creator wants: ${input.description}${input.current?.trim() ? `\n\nTheir current draft (improve it, keep their intent):\n${input.current.slice(0, 4000)}` : ""}`,
         },
       ],
-    });
+    }));
     const text = response.choices[0]?.message?.content?.trim();
     if (!text) throw new AIError("The AI didn't return any instructions. Please try again.", 502, "empty_reply");
     return text.slice(0, 8000);
-  } catch (error) {
-    console.error("Draft instructions error:", (error as any)?.status, (error as any)?.code || (error as any)?.message);
-    throw toAIError(error, model);
   }
 }
 
@@ -247,8 +323,8 @@ export async function translateText(text: string, targetLanguage: string): Promi
   try {
     if (targetLanguage === "en") return text;
 
-    const response = await openai.chat.completions.create({
-      model: (process.env.OPENAI_VISION_MODEL || CHAT_MODEL).trim(),
+    const response = await callAI("translate", CHAT_MODEL, (client, model) => client.chat.completions.create({
+      model,
       messages: [
         {
           role: "system",
@@ -260,19 +336,19 @@ export async function translateText(text: string, targetLanguage: string): Promi
         }
       ],
       max_completion_tokens: 500,
-    });
+    }));
 
     return response.choices[0].message.content || text;
   } catch (error) {
-    console.error("Translation error:", error);
+    console.error("Translation failed:", (error as Error)?.message);
     return text; // Return original text if translation fails
   }
 }
 
 export async function analyzeImage(base64Image: string): Promise<string> {
   try {
-    const response = await openai.chat.completions.create({
-      model: (process.env.OPENAI_VISION_MODEL || CHAT_MODEL).trim(),
+    const response = await callAI("image analysis", (process.env.OPENAI_VISION_MODEL || CHAT_MODEL).trim(), (client, model) => client.chat.completions.create({
+      model,
       messages: [
         {
           role: "user",
@@ -291,11 +367,10 @@ export async function analyzeImage(base64Image: string): Promise<string> {
         },
       ],
       max_completion_tokens: 500,
-    });
+    }));
 
     return response.choices[0].message.content || "I couldn't analyze this image.";
   } catch (error) {
-    console.error("Image analysis error:", (error as any)?.status, (error as any)?.message);
     throw toAIError(error);
   }
 }

@@ -5,6 +5,7 @@ import { pool } from "./db";
 import { appointmentInput, type Appointment, type AppointmentInput } from "@shared/appointments";
 import { describeTime, validTimeZone, zonedDateTime } from "./appointmentDates";
 import { parseAppointmentCommand, parseReminderCommand } from "./appointmentCommands";
+import { appointmentIntent } from "./intents";
 
 // Additive schema setup: never alters or replaces existing calendar/reminder data.
 export async function ensureAppointmentsTable() {
@@ -121,22 +122,17 @@ function appointmentError(res: import("express").Response, error: unknown) {
 export async function handleAppointmentChat(message: string, ownerId: string, requestedZone: unknown): Promise<string | null> {
   // Writing requests ("write an email to move my meeting") go to the assistant, not the calendar.
   if (WRITING_REQUEST.test(message)) return null;
-  if (!/\b(appointment|appointments|schedule|reschedule|book|booking|calendar|meeting|meetings|date|dates|dentist|doctor|cancel|move|change|edit)\b/i.test(message)) return null;
+  // Cheap check first; edit/cancel requests may name a saved title instead of "appointment".
+  if (appointmentIntent(message) === "none" && !/\b(?:cancel|delete|remove|drop|call\s+off|move|change|edit|update|push\s+back|bring\s+forward)\s+(?:my|the|our|an?|that)\b/i.test(message)) return null;
   const timeZone = validTimeZone(requestedZone);
   const all = await listAppointments(ownerId);
   const upcoming = all.filter(item => item.status === "scheduled" && new Date(item.endAt).getTime() > Date.now());
-  if (/^(?:(?:please\s+)?(?:list|show|what|when|do i have)|upcoming)/i.test(message) &&
-      /\b(appointments?|schedule|calendar|meetings?|dates?)\b/i.test(message)) {
-    return upcoming.length
-      ? `Here are your upcoming appointments:\n${upcoming.map(item => `• ${item.title} — ${describeTime(item.startsAt, item.timeZone)}${item.location ? `, ${item.location}` : ""}`).join("\n")}`
-      : "You have no upcoming appointments. Tell me something like “set a dentist appointment next Tuesday at 3pm” to add one.";
-  }
   const command = parseAppointmentCommand(message, upcoming, timeZone);
   if (command.action === "none") return null;
   if (command.action === "clarify") return command.question || "Which appointment, date, and time do you mean?";
   if (command.action === "list") return upcoming.length
-    ? upcoming.map(item => `${item.title} — ${describeTime(item.startsAt, item.timeZone)}`).join("\n")
-    : "You have no upcoming appointments.";
+    ? `Here are your upcoming appointments:\n${upcoming.map(item => `• ${item.title} — ${describeTime(item.startsAt, item.timeZone)}${item.location ? `, ${item.location}` : ""}`).join("\n")}`
+    : "You have no upcoming appointments. Tell me something like “set a dentist appointment next Tuesday at 3pm” to add one.";
   const existing = upcoming.find(item => item.id === command.id);
   if ((command.action === "edit" || command.action === "cancel") && !existing) {
     return "I couldn't identify that appointment. Please give its name and date, or select it in Appointments. I haven't changed anything.";

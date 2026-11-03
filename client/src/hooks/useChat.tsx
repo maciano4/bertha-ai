@@ -36,13 +36,15 @@ function describeChatError(error: unknown): { short: string; detail: string; ai:
   if (code === "bot_unavailable" || code === "bot_not_found") return { ai: false, code, short: "this bot is no longer shared", detail: text };
   if (code === "limit_reached") return { ai: false, code, short: "you've reached today's message limit", detail: text };
   if (code === "insufficient_quota" || /insufficient_quota|out of credits/i.test(text)) {
-    return { ai: true, short: "the OpenAI account is out of credits", detail: text };
+    return { ai: true, code, short: "my AI account is out of credits", detail: text };
   }
-  if (code === "no_api_key" || code === "invalid_api_key" || /invalid_api_key|incorrect api key/i.test(text)) {
-    return { ai: true, short: "the OpenAI API key is missing or invalid", detail: text };
-  }
-  if (code === "rate_limited") return { ai: true, short: "the AI is busy", detail: text };
-  if (code && /model_not_found|ai_|context_too_long/.test(code)) return { ai: true, short: "the AI service returned an error", detail: text };
+  if (code === "no_api_key") return { ai: true, code, short: "my AI key isn't set up", detail: text };
+  if (code === "invalid_api_key" || /invalid_api_key|incorrect api key/i.test(text)) return { ai: true, code, short: "my AI key was rejected", detail: text };
+  if (code === "rate_limited") return { ai: true, code, short: "the AI service is getting too many requests", detail: text };
+  if (code === "context_too_long") return { ai: true, code, short: "this chat has grown too long; please start a new chat", detail: text };
+  if (code === "model_not_found") return { ai: true, code, short: "the AI model isn't available", detail: text };
+  if (code === "ai_timeout") return { ai: true, code, short: "the AI took too long to answer", detail: text };
+  if (code && /^ai_/.test(code)) return { ai: true, code, short: "the AI service isn't responding", detail: text };
   if (code === "not_signed_in") return { ai: false, short: "you have been signed out", detail: "Please log in again." };
   if (/Failed to fetch|NetworkError|Load failed/i.test(text)) {
     return { ai: false, short: "I could not reach the Bertha server", detail: "The server did not answer. Check your connection and that the Replit app is running." };
@@ -120,7 +122,12 @@ export function useChat(conversationId: string | null, bot: { id: string | null;
 
   // Streams the reply when the server sends NDJSON; plain JSON replies (appointments,
   // reminders, weather, greetings) arrive in one piece.
+  const messagesRef = useRef<Message[]>([]);
+  useEffect(() => { messagesRef.current = messages; }, [messages]);
+
   const postChat = useCallback(async (message: string, settings: ChatSettings, targetId: string) => {
+    // What the user last saw from the assistant (including local fallback replies), for "what did you say?".
+    const lastReply = [...messagesRef.current].reverse().find(item => item.role === "assistant" && item.content.trim())?.content.slice(0, 8000);
     const response = await fetch("/api/chat", {
       method: "POST",
       credentials: "include",
@@ -131,6 +138,7 @@ export function useChat(conversationId: string | null, bot: { id: string | null;
         language: settings.language,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         stream: true,
+        ...(lastReply ? { lastReply } : {}),
       }),
     });
     notifyIfUnauthorized(response);
@@ -213,11 +221,11 @@ export function useChat(conversationId: string | null, bot: { id: string | null;
           : reason.code === "bot_unavailable" || reason.code === "bot_not_found"
           ? `${bot.name} isn't available any more: its creator stopped sharing it or deleted it. You can still read this chat, or pick another bot.`
           : reason.ai
-          ? `I heard you${isBertha ? ", dear" : ""}, but my AI service is unavailable right now (${reason.short}). I can still save appointments and reminders for you.`
-          : `I heard you${isBertha ? ", dear" : ""}, but I could not answer just now (${reason.short}). Please try again in a moment.`,
+          ? `Sorry${isBertha ? ", dear" : ""}, I can't answer that right now: ${reason.short}. I can still tell you the time and date, do simple sums, and save appointments and reminders.`
+          : `Sorry${isBertha ? ", dear" : ""}, I couldn't answer just now: ${reason.short}. Please try again in a moment.`,
         `local-fallback-${userMessageId}`,
       );
-      toast({ title: reason.ai ? `${bot.name}'s AI service is unavailable` : "Message not sent", description: reason.detail, variant: "destructive", duration: 10000 });
+      toast({ title: reason.code === "insufficient_quota" ? `${bot.name}'s AI is out of credits` : reason.ai ? `${bot.name}'s AI service is unavailable` : "Message not sent", description: reason.detail, variant: "destructive", duration: 10000 });
       return activeConversationRef.current;
     } finally {
       busyRef.current = false;

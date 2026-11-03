@@ -1,6 +1,7 @@
 import type { Express, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { isRepeatRequest, answerTimeQuestion, answerArithmetic } from "./intents";
 import { generateChatResponse, streamChatResponse, translateText, analyzeImage, toAIError, AIError, CHAT_MODEL, modelFor, type ChatContext } from "./openai";
 import { voiceProfileStorage, analyzeVoiceInput, type VoiceProfile } from "./voiceProfiles";
 import { ObjectStorageService } from "./objectStorage";
@@ -336,7 +337,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Chat endpoint. Order: reminders -> appointments -> weather -> repeat -> greeting -> AI.
+  // Chat endpoint. Order: repeat -> time/date -> arithmetic -> reminders -> appointments -> weather -> greeting -> AI.
   // Send {stream: true} to receive newline-delimited JSON: {"type":"delta","text"} ... {"type":"done",...}.
   app.post("/api/chat", async (req, res) => {
     const user = req.user!;
@@ -366,6 +367,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.json({ response, searchUsed: false, translationUsed: false, conversationId: convId, timestamp: new Date().toISOString(), ...metadata });
       };
 
+      // Local answers first: they are exact, instant and work even when the AI is down.
+      if (isRepeatRequest(message)) {
+        const fromClient = typeof req.body?.lastReply === "string" ? req.body.lastReply.trim().slice(0, 8000) : "";
+        const saved = convId ? [...await chats.getMessages(convId, 40)].reverse().find(m => m.role === "assistant")?.content : undefined;
+        const last = fromClient || saved;
+        return quickReply(last || (bot ? "I haven't said anything in this chat yet." : "I haven't said anything yet, dear. What would you like to talk about?"), { isRepeat: true });
+      }
+      const timeAnswer = answerTimeQuestion(message, timeZone);
+      if (timeAnswer) return quickReply(timeAnswer, { isLocalAnswer: "time" });
+      const mathAnswer = answerArithmetic(message);
+      if (mathAnswer) return quickReply(mathAnswer, { isLocalAnswer: "math" });
+
       const reminderReply = await handleReminderChat(message, user.id, timeZone);
       if (reminderReply !== null) return quickReply(reminderReply, { isReminderResponse: true, appointment: true });
 
@@ -374,7 +387,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Weather (live data from the weather service) unless this is a writing request.
       const isWeatherRequest = !WRITING_REQUEST.test(message) &&
-        /\b(weather|temperature outside|forecast|raining|rainy|will it rain|snowing|will it snow|sunny|cloudy|humid|humidity|windy)\b|what's it like outside|how's the weather/i.test(message);
+        /\b(weather|forecast|temperature outside|is it (?:raining|snowing)|will it (?:rain|snow)|going to (?:rain|snow))\b|what's it like outside|how's the weather/i.test(message);
       if (isWeatherRequest) {
         try {
           let location = "New York";
@@ -407,12 +420,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         voiceProfileStorage.updateUsage(voiceMatch.profileId);
       }
 
-      if (/can you repeat|repeat that|say that again|what did you say|repeat please|repeat last/i.test(message.trim())) {
-        const lastAssistant = [...messages].reverse().find(m => m.role === "assistant");
-        if (lastAssistant) return quickReply(lastAssistant.content, { isRepeat: true });
-      }
-
-      if (!bot && /^(hi|hello|hey|good morning|good afternoon|good evening|how are you|what's up)[\s,.!?]*(bertha)?[\s.!?]*$/i.test(message.trim())) {
+      if (!bot && /^(hi|hello|hey|good morning|good afternoon|good evening)[\s,.!?]*(bertha)?[\s.!?]*$/i.test(message.trim())) {
         const quickResponses = ["Hello dear", "Hello, my child", "Hi there, dear", "Good to see you", "I'm well, thank you dear", "Hello my precious"];
         return quickReply(quickResponses[Math.floor(Math.random() * quickResponses.length)], { isQuickResponse: true });
       }

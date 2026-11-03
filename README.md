@@ -100,3 +100,36 @@ You don't need to run it. `shared/schema.ts` still contains older, unused tables
   - Limits: name up to 60 characters, description 300, instructions 8000, greeting 500. Pictures must be `https://` links or small uploaded images.
 - **Shared card (no sign-in needed).** `GET /public/bots/:slug` returns the card for bots shared by link. It never includes the owner's email, the model or (unless allowed) the instructions.
 - **Chatting with a bot.** `POST /conversations` with `{title, botId}`, then `POST /chat` as usual. The bot comes from the conversation. `GET /conversations?botId=<id|bertha>` filters the list. A bot that has been made private or deleted returns `403 bot_unavailable`. With limits on, `429 limit_reached`.
+
+## Stage 2-fixes: honest AI errors, local answers, stricter intents
+
+**Why Bertha said "the AI is busy":** OpenAI returns HTTP 429 both for real rate limits and for an empty credit balance
+(`{type:"insufficient_quota", code:"credit_balance_exhausted"}`). The server now reads the error body (type, code, message):
+
+| OpenAI error | What Chris sees | Retried? |
+|---|---|---|
+| 429 `insufficient_quota` / `credit_balance_exhausted` (or 402) | "Bertha's AI account is out of credits; add credits at platform.openai.com/settings/organization/billing" | No |
+| 429 `rate_limit_exceeded` | answer after a short wait; if still limited: "too many requests… wait a minute" | Up to 3 times, honouring `retry-after` |
+| 401 | "the OpenAI API key was rejected… check OPENAI_API_KEY" | No |
+| 5xx / connection | "AI service isn't responding" | Yes |
+
+The server console logs `[ai] chat via OpenAI failed: status=… type=… code=… message="…"` (keys are redacted).
+
+**Answered locally (instant, work even with no AI credits):** current time / date / day / month / year in the user's
+time zone, simple arithmetic ("what is 12 times 7", "15% of 80"), and "what did you say?" / "repeat that"
+(repeats the last reply shown on screen). Appointment and reminder handlers only run for clear requests
+("schedule a dentist appointment Friday at 3pm", "what are my appointments", "remind me to…"); everything
+else ("what's up", "what did you say", general questions) goes to the AI.
+
+**Optional fallback AI provider** (used when OpenAI is out of credits, rate limited, or down):
+
+| Secret | Meaning |
+|---|---|
+| `OPENAI_BASE_URL` | Override the OpenAI endpoint (default api.openai.com) |
+| `OPENROUTER_API_KEY` (+ `OPENROUTER_MODEL`, default `openai/gpt-4o-mini`) | OpenRouter fallback |
+| `GROQ_API_KEY` (+ `GROQ_MODEL`, default `llama-3.3-70b-versatile`) | Groq fallback |
+| `AI_FALLBACK_API_KEY` + `AI_FALLBACK_BASE_URL` (+ `AI_FALLBACK_MODEL`, `AI_FALLBACK_NAME`) | Any OpenAI-compatible provider |
+| `AI_MAX_RETRIES` | Rate-limit retries per provider (default 3, max 5) |
+
+**On Replit:** in the Shell run `git fetch github && git checkout -b stage2-fixes github/stage2-fixes && npm install`, then press Run.
+Bertha still needs OpenAI credits (or a fallback key) for open-ended questions.

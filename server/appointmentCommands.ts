@@ -1,6 +1,7 @@
 import * as chrono from "chrono-node";
 import type { Appointment } from "@shared/appointments";
 import { localParts, zonedDateTime } from "./appointmentDates";
+import { appointmentIntent, isReminderRequest } from "./intents";
 
 export interface AppointmentCommand {
   action: "create" | "list" | "edit" | "cancel" | "clarify" | "none";
@@ -24,18 +25,22 @@ const normalize = (value: string) => value.toLowerCase()
 
 export function parseAppointmentCommand(message: string, upcoming: Appointment[], timeZone: string, now = new Date()): AppointmentCommand {
   const clarify = (question: string): AppointmentCommand => ({ ...empty, action: "clarify", question });
-  const isCancel = /\b(cancel|delete|remove)\b/i.test(message);
-  const isEdit = /\b(reschedule|move|change|edit|update|postpone)\b/i.test(message);
-  const isCreate = /\b(set|schedule|book|add|create|make|arrange)\b/i.test(message);
-  if (!isCancel && !isEdit && !isCreate) return { ...empty };
+  // Only clear requests ("set a dentist appointment...", "move my meeting...") reach the parser.
+  const intent = appointmentIntent(message, upcoming.map(item => item.title));
+  if (intent === "list") return { ...empty, action: "list" };
+  if (intent !== "create" && intent !== "edit" && intent !== "cancel") return { ...empty };
+  const isCancel = intent === "cancel";
+  const isEdit = intent === "edit";
 
   const p = localParts(now, timeZone);
   const localReference = new Date(Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute));
   // Parse a synthetic local clock so server timezone and DST cannot shift weekdays.
   const parsed = chrono.en.parse(message, { instant: localReference, timezone: 0 }, { forwardDate: true })[0];
   let target = (parsed ? message.slice(0, parsed.index) : message)
-    .replace(/^\s*(?:please\s+)?(?:can|could|would)\s+you\s+/i, "")
-    .replace(/^\s*(?:please\s+)?(?:set|schedule|book|add|create|make|arrange|reschedule|move|change|edit|update|postpone|cancel|delete|remove)\s+/i, "")
+    .replace(/^\s*(?:(?:hey|hi|ok|okay)\s+)?(?:bertha[,\s]+)?/i, "")
+    .replace(/^\s*(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?(?:(?:i\s+(?:want|need|would\s+like)\s+to|i'd\s+like\s+to|help\s+me|let's|lets)\s+)?(?:please\s+)?/i, "")
+    .replace(/^\s*(?:set\s+up|push\s+back|bring\s+forward|call\s+off|put\s+in)\s+/i, "")
+    .replace(/^\s*(?:please\s+)?(?:set|schedule|book|add|create|make|arrange|put|reschedule|move|change|edit|update|postpone|cancel|delete|remove|drop)\s+/i, "")
     .replace(/^\s*(?:an?|my|the)\s+/i, "")
     .replace(/\s+(?:to|on|at|for|from)\s*$/i, "").trim();
   let existing: Appointment | undefined;
@@ -105,7 +110,7 @@ export type ReminderCommand =
 // "set a reminder for tomorrow at 9am to water the plants".
 export function parseReminderCommand(message: string, timeZone: string, now = new Date()): ReminderCommand {
   const text = message.trim();
-  if (!/^(?:(?:hey\s+|hi\s+)?bertha[,\s]+)?(?:please\s+)?(?:can|could|would)?\s*(?:you\s+)?(?:please\s+)?(?:remind\s+me\b|set\s+(?:a|an|me\s+a)\s+reminder\b|add\s+a\s+reminder\b|create\s+a\s+reminder\b)/i.test(text)) return { action: "none" };
+  if (!isReminderRequest(text)) return { action: "none" };
   if (/\b\d+\s*(?:minutes?|mins?|hours?|hrs?)\s+before\b/i.test(text)) return { action: "none" }; // appointment reminder syntax
   const p = localParts(now, timeZone);
   const localReference = new Date(Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute));
