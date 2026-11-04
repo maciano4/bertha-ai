@@ -115,6 +115,11 @@ export default function MessageBubble({ message, showAvatar, assistant = BERTHA 
                   Web Search
                 </span>
               )}
+              {message.metadata?.interrupted && (
+                <span className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded-full" data-testid="badge-interrupted" title="You interrupted this reply">
+                  Interrupted
+                </span>
+              )}
               {message.metadata?.translationUsed && (
                 <span className="text-xs text-accent-foreground bg-accent px-2 py-1 rounded-full">
                   Translated

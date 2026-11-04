@@ -1,8 +1,11 @@
 import type { Express, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { pool } from "./db";
+import { registerMemoryRoutes, learnFromTurn, rememberUnanswered, promptContext } from "./memory";
+import { heuristicTitle } from "./memoryExtract";
 import { isRepeatRequest, answerTimeQuestion, answerArithmetic } from "./intents";
-import { generateChatResponse, streamChatResponse, translateText, analyzeImage, toAIError, AIError, CHAT_MODEL, modelFor, type ChatContext } from "./openai";
+import { hasAIProvider, completeJSON, generateChatResponse, streamChatResponse, translateText, analyzeImage, toAIError, AIError, CHAT_MODEL, modelFor, type ChatContext } from "./openai";
 import { voiceProfileStorage, analyzeVoiceInput, type VoiceProfile } from "./voiceProfiles";
 import { ObjectStorageService } from "./objectStorage";
 import { WeatherService } from "./weatherService";
@@ -32,6 +35,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use("/api", requireAuth);
   registerAppointmentRoutes(app);
   registerBotRoutes(app);
+  registerMemoryRoutes(app);
   // Voice profile endpoints
   app.post("/api/voice/profiles", async (req, res) => {
     try {
@@ -340,6 +344,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Chat endpoint. Order: repeat -> time/date -> arithmetic -> reminders -> appointments -> weather -> greeting -> AI.
   // Send {stream: true} to receive newline-delimited JSON: {"type":"delta","text"} ... {"type":"done",...}.
   app.post("/api/chat", async (req, res) => {
+    const requestStartedAt = new Date();
     const user = req.user!;
     const { message, conversationId, language = "en" } = req.body ?? {};
     if (!message || typeof message !== "string" || !message.trim()) {
@@ -361,8 +366,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (botId && !bot) return res.status(403).json({ error: "This bot is no longer shared, so you can't chat with it. Your earlier messages are still here.", code: "bot_unavailable" });
       if (bot && !conversation) await rememberSharedBot(user.id, bot);
       await assertCanSendMessage(user.id);
+      // First message of a chat: keep the welcome Bertha showed (so "yes, let's" makes sense) and
+      // give the chat a short title.
+      const isFirstTurn = convId ? (await chats.getMessages(convId, 1)).length === 0 : false;
+      if (isFirstTurn && convId) {
+        const greeting = typeof req.body?.greeting === "string" ? req.body.greeting.trim().slice(0, 1500) : "";
+        if (greeting) await chats.addMessage(convId, "assistant", greeting, { welcome: true });
+      }
+      const afterTurn = (reply: string | undefined, usedAI: boolean) => {
+        void learnFromTurn({ userId: user.id, botId: bot?.id ?? null, conversationId: convId, userText: message, reply, timeZone, aiAvailable: usedAI && hasAIProvider() });
+        if (isFirstTurn && conversation) void autoTitle(user.id, conversation, message, reply, usedAI);
+      };
       const quickReply = async (response: string, metadata: Record<string, unknown>) => {
         await chats.saveExchange(convId, message, response, metadata);
+        afterTurn(undefined, false);
         await recordMessage(user.id, false).catch(error => console.error("usage count failed", error));
         return res.json({ response, searchUsed: false, translationUsed: false, conversationId: convId, timestamp: new Date().toISOString(), ...metadata });
       };
@@ -429,8 +446,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .filter(item => item.status === "scheduled" && new Date(item.endAt).getTime() > Date.now())
         .slice(0, 15)
         .map(item => `${item.title} — ${describeTime(item.startsAt, item.timeZone)}${item.location ? ` at ${item.location}` : ""}`);
+      const remembered = await promptContext(user.id, bot?.id ?? null).catch(() => ({ memories: [], openLoops: [] }));
       const ctx: ChatContext = {
         language, timeZone, userName: user.displayName, recognizedUser, upcomingAppointments,
+        memories: remembered.memories, openLoops: remembered.openLoops,
+        voice: req.body?.voice === true, interrupted: req.body?.interrupted === true,
         bot: bot ? { name: bot.name, instructions: bot.instructions, model: bot.model, showInstructions: bot.showInstructions } : null,
       };
       const metadata = { model: modelFor(ctx), translationUsed: language !== "en", ...(bot ? { botId: bot.id } : {}) };
@@ -440,24 +460,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (req.body?.stream !== true) {
         const ai = await generateChatResponse(message, conversationHistory, ctx);
         await chats.saveExchange(convId, message, ai.content, metadata);
+        afterTurn(ai.content, true);
         await countAI();
         return res.json({ response: ai.content, searchUsed: false, translationUsed: ai.translationUsed, recognizedUser, conversationId: convId, timestamp: new Date().toISOString() });
       }
 
       // Throws (bad key, no credits...) before any bytes are sent, so errors stay clean JSON.
-      const stream = await streamChatResponse(message, conversationHistory, ctx);
+      // Interrupting (Stop, or sending a new message) closes the request; that aborts the AI stream
+      // at once so no more tokens are generated or billed.
+      const abort = new AbortController();
+      let clientGone = false;
+      res.on("close", () => { if (!res.writableEnded) { clientGone = true; abort.abort(); } });
+      const stream = await streamChatResponse(message, conversationHistory, ctx, abort.signal);
       await countAI();
       res.status(200);
       res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
       res.setHeader("X-Accel-Buffering", "no");
       res.flushHeaders();
       let full = "";
-      let clientGone = false;
-      res.on("close", () => { clientGone = !res.writableEnded; });
       try {
         for await (const text of stream) {
+          if (clientGone) break;
           full += text;
-          if (!clientGone) res.write(JSON.stringify({ type: "delta", text }) + "\n");
+          res.write(JSON.stringify({ type: "delta", text }) + "\n");
         }
       } catch (error) {
         const aiError = toAIError(error);
@@ -465,11 +490,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!clientGone) res.end(JSON.stringify({ type: "error", error: aiError.message, code: aiError.code, partial: full }) + "\n");
         return;
       }
+      if (clientGone) {
+        // Keep what Bertha had said so far, marked as interrupted.
+        await chats.saveExchange(convId, message, full.trim() ? full.trim() + " …" : "…", { ...metadata, interrupted: true }, requestStartedAt).catch(() => {});
+        console.log(`[chat] interrupted after ${full.length} chars`);
+        afterTurn(undefined, false);
+        return;
+      }
       const response = full.trim() || sorry;
       await chats.saveExchange(convId, message, response, metadata);
+      afterTurn(response, true);
       if (!clientGone) res.end(JSON.stringify({ type: "done", response, searchUsed: false, translationUsed: metadata.translationUsed, recognizedUser, conversationId: convId, timestamp: new Date().toISOString() }) + "\n");
     } catch (error) {
       if (res.headersSent) { try { res.end(); } catch {} return; }
+      if ((error as any)?.name === "APIUserAbortError" || res.destroyed) return; // interrupted before the first token
+      if (error instanceof AIError && conversationId) {
+        // Bertha couldn't answer (no credits, outage): remember the question to come back to it.
+        void rememberUnanswered(user.id, null, String(conversationId), message);
+        // Still learn what we can offline (name, people, tasks) even though the AI failed.
+        void learnFromTurn({ userId: user.id, botId: null, conversationId: String(conversationId), userText: message, timeZone: String(req.body?.timeZone || user.timeZone || "UTC"), aiAvailable: false });
+      }
       return sendError(res, error, "Failed to process chat message");
     }
   });
@@ -513,7 +553,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/conversations", async (req, res) => {
     try {
-      const all = await chats.listConversations(req.user!.id);
+      const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 100) : "";
+      const all = q ? await chats.searchConversations(req.user!.id, q) : await chats.listConversations(req.user!.id);
       const filter = typeof req.query.botId === "string" ? req.query.botId : undefined; // "bertha" = built-in bot
       res.json(filter === undefined ? all : all.filter((c: any) => (c.botId ?? "bertha") === filter));
     }
@@ -653,4 +694,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   const httpServer = createServer(app);
   return httpServer;
+}
+
+// Gives a new chat a short title from its first message; upgrades it with the AI when available.
+// Only replaces the title the chat was created with, never one the user typed.
+async function autoTitle(userId: string, conversation: chats.StoredConversation, message: string, reply: string | undefined, usedAI: boolean) {
+  try {
+    const original = conversation.title;
+    const quick = heuristicTitle(message);
+    if (quick !== original) await pool.query(`UPDATE bertha_conversations SET title = $3 WHERE id = $1 AND user_id = $2 AND title = $4`, [conversation.id, userId, quick, original]);
+    if (!usedAI || !hasAIProvider() || !reply || process.env.BERTHA_TITLE_AI === "0") return;
+    const result = await completeJSON<{ title?: string }>("title", 'Name this chat in 2-6 words, like a friend would label it (no quotes, no emojis, no ending punctuation). Return JSON {"title":"..."}.', `User: ${message.slice(0, 600)}\nAssistant: ${reply.slice(0, 600)}`, 40);
+    const title = String(result.title || "").replace(/["“”.]+/g, "").trim().slice(0, 60);
+    if (title) await pool.query(`UPDATE bertha_conversations SET title = $3 WHERE id = $1 AND user_id = $2 AND title = $4`, [conversation.id, userId, title, quick]);
+  } catch (error) { console.error("[title] skipped:", (error as Error).message?.slice(0, 120)); }
 }

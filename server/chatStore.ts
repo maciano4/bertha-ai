@@ -67,6 +67,28 @@ export async function listConversations(userId: string) {
   return plain(result.rows);
 }
 
+// Finds chats whose title or any message contains the words (case-insensitive), newest first,
+// with a short snippet around the first match.
+export async function searchConversations(userId: string, q: string) {
+  const like = `%${q.replace(/[\\%_]/g, ch => "\\" + ch)}%`;
+  const result = await pool.query(`
+    SELECT c.id, c.user_id AS "userId", c.title, c.bot_id AS "botId", c.created_at AS "createdAt", c.updated_at AS "updatedAt",
+      b.name AS "botName", b.avatar_emoji AS "botAvatarEmoji", b.avatar_url AS "botAvatarUrl",
+      (SELECT count(*) FROM bertha_messages m WHERE m.conversation_id = c.id)::int AS "messageCount",
+      COALESCE(hit.content, '') AS "lastMessage",
+      COALESCE((SELECT max(created_at) FROM bertha_messages m WHERE m.conversation_id = c.id), c.updated_at) AS "lastActivityAt"
+    FROM bertha_conversations c
+    LEFT JOIN LATERAL (SELECT content FROM bertha_messages m WHERE m.conversation_id = c.id AND m.content ILIKE $2 ORDER BY created_at DESC LIMIT 1) hit ON true
+    LEFT JOIN bertha_bots b ON b.id = c.bot_id
+    WHERE c.user_id = $1 AND (c.title ILIKE $2 OR hit.content IS NOT NULL)
+    ORDER BY "lastActivityAt" DESC LIMIT 50`, [userId, like]);
+  return plain(result.rows).map((row: any) => {
+    const text: string = row.lastMessage || "";
+    const at = text.toLowerCase().indexOf(q.toLowerCase());
+    return { ...row, snippet: at < 0 ? text.slice(0, 90) : (at > 30 ? "…" : "") + text.slice(Math.max(0, at - 30), at + q.length + 60) };
+  });
+}
+
 export async function renameConversation(userId: string, id: string, title: unknown) {
   const result = await pool.query(
     `UPDATE bertha_conversations SET title = $3, updated_at = now() WHERE id = $1 AND user_id = $2 RETURNING ${conversationColumns}`,
@@ -90,18 +112,20 @@ export async function getMessages(conversationId: string, limit = 500): Promise<
   return plain(result.rows);
 }
 
-export async function addMessage(conversationId: string, role: StoredMessage["role"], content: string, metadata: Record<string, unknown> | null = null): Promise<StoredMessage> {
+export async function addMessage(conversationId: string, role: StoredMessage["role"], content: string, metadata: Record<string, unknown> | null = null, at?: Date): Promise<StoredMessage> {
   const result = await pool.query(
-    `INSERT INTO bertha_messages (id, conversation_id, role, content, metadata) VALUES ($1, $2, $3, $4, $5) RETURNING ${messageColumns}`,
-    [randomUUID(), conversationId, role, content, metadata ? JSON.stringify(metadata) : null],
+    `INSERT INTO bertha_messages (id, conversation_id, role, content, metadata, created_at) VALUES ($1, $2, $3, $4, $5, COALESCE($6::timestamptz, now())) RETURNING ${messageColumns}`,
+    [randomUUID(), conversationId, role, content, metadata ? JSON.stringify(metadata) : null, at ? at.toISOString() : null],
   );
   await pool.query(`UPDATE bertha_conversations SET updated_at = now() WHERE id = $1`, [conversationId]);
   return plain(result.rows[0]);
 }
 
 // Saves one user turn and Bertha's answer, a few milliseconds apart so their order is stable.
-export async function saveExchange(conversationId: string | null | undefined, userText: string, reply: string, metadata: Record<string, unknown> | null = null) {
+// `at` back-dates the pair to when the user sent it, so an interrupted reply saved late still
+// sorts before the message that interrupted it.
+export async function saveExchange(conversationId: string | null | undefined, userText: string, reply: string, metadata: Record<string, unknown> | null = null, at?: Date) {
   if (!conversationId) return;
-  await addMessage(conversationId, "user", userText, null);
-  await addMessage(conversationId, "assistant", reply, metadata);
+  await addMessage(conversationId, "user", userText, null, at);
+  await addMessage(conversationId, "assistant", reply, metadata, at ? new Date(at.getTime() + 1) : undefined);
 }

@@ -133,3 +133,12 @@ else ("what's up", "what did you say", general questions) goes to the AI.
 
 **On Replit:** in the Shell run `git fetch github && git checkout -b stage2-fixes github/stage2-fixes && npm install`, then press Run.
 Bertha still needs OpenAI credits (or a fallback key) for open-ended questions.
+
+## Stage 3-human: past chats, memory, follow-ups, interruption (branch `stage3-human`)
+- **Past chats**: the sidebar has search (titles + message text, with snippets) and shows when each chat was last active. Chats get an AI title after the first exchange (only when the AI is available).
+- **Memory**: per-user facts (`user_memories`) are learned with offline heuristics plus AI extraction when credits exist. Settings → Memory lets you view, add, delete or forget everything.
+- **Follow-ups** (`follow_ups`): unfinished tasks, unanswered questions, chats left mid-way (after `BERTHA_UNFINISHED_AFTER_SEC`, default 1200) and upcoming appointments. A new chat opens with a greeting that mentions 1–2 of them, with Continue / Done / Not now. Due items are checked every 60s and shown as a toast, or as a browser notification when the tab is hidden and permission is granted.
+- **Interruption**: a Stop button; sending while Bertha is replying aborts the reply (the server cancels the OpenAI stream and saves the partial marked "Interrupted"); voice barge-in (VAD with echo cancellation, toggle in Settings; needs a mic grant first) and tap-to-stop while she speaks.
+- **Style**: the prompt asks for a warm, human conversational style, and voice turns get short spoken-style answers.
+- Tables are created at server start. All AI calls go through the resilient client.
+- Limits: barge-in is unreliable on iOS Safari and works best with headphones; without credits only heuristic memory runs; notifications only work while the app is open.

@@ -6,6 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Image, ExternalLink, Info } from "lucide-react";
 import { VoiceSettings } from "../VoiceSettings";
+import MemoryPanel from "./MemoryPanel";
 import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
@@ -198,6 +199,8 @@ export default function SettingsPanel({ onBackgroundChange }: SettingsPanelProps
           </Button>
         </CardContent>
       </Card>
+
+      <MemoryPanel />
 
       {/* Voice Selection */}
       <div className="m-4">

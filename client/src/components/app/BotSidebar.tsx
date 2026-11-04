@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, X, ChevronRight, SquarePen, Trash2, CalendarDays, LogOut, Settings, Bot as BotIcon, ChevronsUpDown } from "lucide-react";
+import { Plus, X, Search, ChevronRight, SquarePen, Trash2, CalendarDays, LogOut, Settings, Bot as BotIcon, ChevronsUpDown } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import BotAvatar from "@/components/bots/BotAvatar";
 import InstallApp from "./InstallApp";
@@ -20,6 +20,21 @@ interface Row { id: string | null; name: string; avatarEmoji: string | null; ava
 
 const CHATS_SHOWN = 6;
 
+// "now", "5m", "3h", "Tue", "Mar 4": short, like a messaging app.
+export function lastActive(iso?: string | Date | null, now = new Date()) {
+  if (!iso) return "";
+  const t = new Date(iso); const mins = (now.getTime() - t.getTime()) / 60000;
+  if (Number.isNaN(mins)) return "";
+  if (mins < 1) return "now";
+  if (mins < 60) return `${Math.floor(mins)}m`;
+  if (mins < 24 * 60 && t.getDate() === now.getDate()) return `${Math.floor(mins / 60)}h`;
+  if (mins < 48 * 60 && new Date(now.getTime() - 86400000).getDate() === t.getDate()) return "Yesterday";
+  if (mins < 7 * 24 * 60) return t.toLocaleDateString(undefined, { weekday: "short" });
+  return t.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+type SearchHit = ConversationSummary & { snippet?: string; botName?: string | null };
+
 export default function BotSidebar({ onClose }: { onClose: () => void }) {
   const nav = useChatNav();
   const [location] = useLocation();
@@ -32,6 +47,14 @@ export default function BotSidebar({ onClose }: { onClose: () => void }) {
   const shared = useQuery<PublicBot[]>({ queryKey: ["/api/bots/shared"] });
   const conversations = useQuery<ConversationSummary[]>({ queryKey: ["/api/conversations"] });
   const usage = useQuery<Usage>({ queryKey: ["/api/usage"] });
+  const [query, setQuery] = useState("");
+  const [debounced, setDebounced] = useState("");
+  useEffect(() => { const t = setTimeout(() => setDebounced(query.trim()), 250); return () => clearTimeout(t); }, [query]);
+  const search = useQuery<SearchHit[]>({
+    queryKey: ["/api/conversations", "search", debounced],
+    enabled: debounced.length > 0,
+    queryFn: async () => (await apiRequest("GET", `/api/conversations?q=${encodeURIComponent(debounced)}`)).json(),
+  });
 
   const chatsByBot = useMemo(() => {
     const map = new Map<string, ConversationSummary[]>();
@@ -127,6 +150,7 @@ export default function BotSidebar({ onClose }: { onClose: () => void }) {
                     aria-current={current ? "page" : undefined} data-testid={`conversation-${chat.id}`}>
                     {chat.title || "New chat"}
                   </button>
+                  <span className="shrink-0 pr-1 text-[10px] tabular-nums text-muted-foreground md:group-hover/chat:hidden" data-testid={`last-active-${chat.id}`}>{lastActive(chat.lastActivityAt)}</span>
                   <button type="button" onClick={() => removeChat(chat)} className="mr-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground opacity-100 hover:text-destructive md:opacity-0 md:group-hover/chat:opacity-100 md:focus:opacity-100"
                     aria-label={`Delete chat ${chat.title}`} data-testid={`delete-conversation-${chat.id}`}>
                     <Trash2 className="h-3.5 w-3.5" />
@@ -166,6 +190,34 @@ export default function BotSidebar({ onClose }: { onClose: () => void }) {
         </Link>
       </div>
 
+      <div className="px-3 pb-2">
+        <label className="relative block">
+          <span className="sr-only">Search chats</span>
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input type="search" value={query} onChange={e => setQuery(e.target.value)} placeholder="Search chats"
+            className="h-8 w-full rounded-lg border border-sidebar-border bg-background/60 pl-8 pr-2 text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring" data-testid="input-search-chats" />
+        </label>
+      </div>
+
+      {query.trim() ? (
+        <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3" aria-label="Search results" data-testid="search-results">
+          {search.isLoading || debounced !== query.trim() ? <p className="px-2 py-1 text-xs text-muted-foreground">Searching…</p>
+            : !search.data?.length ? <p className="px-2 py-1 text-xs text-muted-foreground" data-testid="search-empty">No chats match "{query.trim()}"</p>
+            : (
+              <ul className="space-y-0.5">
+                {search.data.map(hit => (
+                  <li key={hit.id}>
+                    <button type="button" onClick={() => { nav.open(hit.botId ?? null, hit.id); setQuery(""); }}
+                      className={cn("w-full rounded-md px-2 py-1.5 text-left hover:bg-sidebar-accent/60", nav.conversationId === hit.id && "bg-sidebar-accent")} data-testid={`search-hit-${hit.id}`}>
+                      <span className="flex items-center gap-2 text-[13px] font-medium"><span className="min-w-0 flex-1 truncate">{hit.title || "New chat"}</span><span className="shrink-0 text-[10px] font-normal text-muted-foreground">{lastActive(hit.lastActivityAt)}</span></span>
+                      <span className="block truncate text-xs text-muted-foreground">{hit.botName ? `${hit.botName} · ` : ""}{hit.snippet}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+        </nav>
+      ) : (
       <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 pb-3" aria-label="Bots">
         <ul className="space-y-0.5" data-testid="sidebar-my-bots">
           {renderRow({ id: null, name: BERTHA.name, avatarEmoji: null, avatarUrl: BERTHA.avatarUrl })}
@@ -181,6 +233,7 @@ export default function BotSidebar({ onClose }: { onClose: () => void }) {
           </>
         )}
       </nav>
+      )}
 
       <div className="space-y-0.5 border-t border-sidebar-border p-2">
         <InstallApp />

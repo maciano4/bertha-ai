@@ -55,6 +55,7 @@ async function callAI<T>(where: string, model: string, run: (client: OpenAI, mod
       try {
         return await run(provider.client, useModel);
       } catch (error) {
+        if ((error as any)?.name === "APIUserAbortError" || (error as any)?.name === "AbortError") throw error; // the user interrupted
         lastError = error;
         const kind = classifyAIError(error);
         const canRetry = isRetryable(kind) && attempt < MAX_RETRIES && waited < 15_000;
@@ -141,6 +142,10 @@ export interface ChatContext {
   upcomingAppointments?: string[];
   nlpAnalysis?: NLPAnalysis;
   bot?: BotPersona | null;
+  memories?: string[];      // durable facts about the user from earlier chats
+  openLoops?: string[];     // unfinished things to gently pick back up
+  voice?: boolean;          // reply will be spoken aloud
+  interrupted?: boolean;    // the user cut off the previous reply
 }
 
 function nowInZone(timeZone: string) {
@@ -209,6 +214,14 @@ RESPONSE LENGTH
 - Stories, explanations, advice: thorough, 3-6 sentences or a short list.
 - Replies may be read aloud, so prefer plain sentences; use short lists only when they really help.
 
+CONVERSATION STYLE (sound like a real person, not a machine)
+- Talk the way a warm, attentive person talks: natural, relaxed, concise. Answer first, then stop.
+- Vary your phrasing; don't open every reply the same way, and don't repeat the user's question back.
+- No robotic filler: never say "As an AI", "I hope this helps", "Feel free to ask", "Great question" or "Is there anything else I can help with?".
+- When it fits, end with one short, genuine follow-up question about what they said (not every time).
+- Use what you remember about the user (below) naturally, like a friend would, without listing it or saying "according to my memory".
+- If the user interrupts you or changes topic, drop the old thread at once and answer the new message; don't apologise at length.
+
 CONVERSATION
 - This is one continuous conversation. Remember what was said earlier and understand short follow-ups ("and tomorrow?", "why?", "make it shorter").
 - Don't greet again or reintroduce yourself after the first message.
@@ -217,6 +230,14 @@ CONVERSATION
 Response language: ${language === "en" ? "English" : `respond in the language with code "${language}"`}.`;
 
   if (ctx.userName) prompt += `\n\nThe user's name is ${ctx.userName}. Use it now and then, naturally.`;
+  if (ctx.memories?.length) {
+    prompt += `\n\nWHAT YOU REMEMBER ABOUT THE USER FROM EARLIER CHATS (facts they told you; use naturally, and trust newer messages if they conflict):\n${ctx.memories.slice(0, 40).map(m => `- ${m}`).join("\n")}`;
+  }
+  if (ctx.openLoops?.length) {
+    prompt += `\n\nUNFINISHED THINGS FROM EARLIER (only bring one up if it fits naturally; never nag):\n${ctx.openLoops.slice(0, 5).map(m => `- ${m}`).join("\n")}`;
+  }
+  if (ctx.interrupted) prompt += `\n\nThe user just interrupted your previous reply (it was cut off). Answer their new message directly.`;
+  if (ctx.voice) prompt += `\n\nThis reply will be SPOKEN aloud: keep it short (1-3 sentences unless they asked for more), conversational, no lists, no markdown, no dashes block unless it's a writing task.`;
   if (ctx.recognizedUser) prompt += `\n\nThe person speaking appears to be ${ctx.recognizedUser} (recognized from their voice profile).`;
   if (ctx.upcomingAppointments) {
     prompt += ctx.upcomingAppointments.length
@@ -260,19 +281,21 @@ async function nlpFor(userInput: string, history: Array<{ role: string; content:
 
 // Starts a streamed answer. Any OpenAI error (bad key, no credits...) is thrown as an AIError
 // BEFORE the first token, so the route can still answer with a clean JSON error.
-export async function streamChatResponse(userInput: string, history: Array<{ role: string; content: string }>, ctx: ChatContext): Promise<AsyncIterable<string>> {
+export async function streamChatResponse(userInput: string, history: Array<{ role: string; content: string }>, ctx: ChatContext, signal?: AbortSignal): Promise<AsyncIterable<string>> {
   if (!hasAIProvider()) throw toAIError(new Error("missing key"));
   const nlpAnalysis = ctx.nlpAnalysis ?? await nlpFor(userInput, history).catch(() => undefined);
   const messages = buildMessages(userInput, history, { ...ctx, nlpAnalysis });
   const stream: AsyncIterable<any> = await callAI("chat", modelFor(ctx), (client, model) =>
-    client.chat.completions.create({ ...requestOptions(model), messages, stream: true }) as any);
+    client.chat.completions.create({ ...requestOptions(model), messages, stream: true }, { signal }) as any);
   return (async function* () {
     try {
       for await (const chunk of stream) {
+        if (signal?.aborted) return;
         const text = chunk.choices?.[0]?.delta?.content;
         if (text) yield text as string;
       }
     } catch (error) {
+      if (signal?.aborted) return; // the user interrupted: not an error
       logAIError("chat stream", "AI", error);
       throw toAIError(error, modelFor(ctx));
     }
@@ -373,4 +396,17 @@ export async function analyzeImage(base64Image: string): Promise<string> {
   } catch (error) {
     throw toAIError(error);
   }
+}
+
+// Small JSON-returning helper for background jobs (memory extraction, titles). Goes through callAI,
+// so retries / out-of-credits / fallback providers behave exactly like chat. Throws AIError on failure.
+export async function completeJSON<T = unknown>(where: string, system: string, user: string, maxTokens = 500): Promise<T> {
+  if (!hasAIProvider()) throw toAIError(new Error("missing key"));
+  const response = await callAI(where, CHAT_MODEL, (client, model) => client.chat.completions.create({
+    model, messages: [{ role: "system", content: system }, { role: "user", content: user }],
+    ...(isReasoningModel(model) ? { max_completion_tokens: 2000 } : { max_completion_tokens: maxTokens, temperature: 0.2 }),
+    response_format: { type: "json_object" },
+  }));
+  const text = response.choices[0]?.message?.content || "{}";
+  return JSON.parse(text.replace(/^```(?:json)?|```$/g, "").trim()) as T;
 }

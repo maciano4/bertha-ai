@@ -1,15 +1,17 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Mic, Send, Image, Volume2, VolumeX } from "lucide-react";
+import { Mic, Send, Image, Volume2, VolumeX, Square } from "lucide-react";
 import { useSpeech } from "@/hooks/useSpeech";
 import { useCamera } from "@/hooks/useCamera";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 
 interface ChatInputProps {
-  onSendMessage: (message: string) => void;
+  onSendMessage: (message: string, options?: { voice?: boolean }) => void;
   isLoading: boolean;
+  /** Stops the reply being written. Typing a new message while it writes also interrupts it. */
+  onStop?: () => void;
   language: string;
   speechEnabled?: boolean;
   onToggleSpeech?: () => void;
@@ -23,6 +25,7 @@ export default function ChatInput({
   botName = "Bertha",
   onSendMessage,
   isLoading,
+  onStop,
   language,
   speechEnabled = true,
   onToggleSpeech,
@@ -70,7 +73,7 @@ export default function ChatInput({
 
   const handleSend = () => {
     const trimmed = message.trim();
-    if (!trimmed || isLoading) return;
+    if (!trimmed) return; // while a reply is being written, this interrupts it
 
     onSendMessage(trimmed);
     setMessage("");
@@ -111,7 +114,7 @@ export default function ChatInput({
         const textToSend = accumulatedText.trim();
         if (textToSend) {
           console.log('Sending message:', textToSend);
-          onSendMessage(textToSend);
+          onSendMessage(textToSend, { voice: true });
           setMessage("");
           setCharCount(0);
           accumulatedText = ""; // Clear accumulated text
@@ -251,14 +254,22 @@ export default function ChatInput({
         </div>
       </div>
 
-      {/* Send Button */}
-      <Button
-        onClick={handleSend}
-        disabled={!message.trim() || isLoading}
-        data-testid="button-send"
-      >
-        <Send className="h-5 w-5" />
-      </Button>
+      {/* Stop (while answering) and Send. Sending while answering interrupts, like talking over someone. */}
+      {isLoading && onStop && (
+        <Button variant="destructive" onClick={onStop} aria-label={`Stop ${botName}`} title={`Stop ${botName}`} data-testid="button-stop">
+          <Square className="h-4 w-4 fill-current" />
+        </Button>
+      )}
+      {(!isLoading || message.trim() || !onStop) && (
+        <Button
+          onClick={handleSend}
+          disabled={!message.trim()}
+          aria-label={isLoading ? "Interrupt and send" : "Send"}
+          data-testid="button-send"
+        >
+          <Send className="h-5 w-5" />
+        </Button>
+      )}
     </div>
   );
 }

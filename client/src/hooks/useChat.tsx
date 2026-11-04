@@ -13,8 +13,16 @@ export interface Message {
     translationUsed?: boolean;
     searchResults?: string;
     recognizedUser?: string;
+    interrupted?: boolean;
+    welcome?: boolean;
+    welcomeItems?: WelcomeItem[];
+    welcomeText?: string;
   };
 }
+
+export interface WelcomeItem { id: string; kind: string; text: string; summary?: string; conversationId?: string | null }
+
+export interface SendOptions { voice?: boolean }
 
 export interface ChatSettings {
   language: string;
@@ -23,6 +31,8 @@ export interface ChatSettings {
 }
 
 const isLocalOnly = (id: string) => id.startsWith("local-") || id.startsWith("appointment-reminder-");
+const WELCOME_ID = "local-welcome";
+const isAbort = (error: unknown) => (error as any)?.name === "AbortError";
 
 class ChatError extends Error {
   constructor(message: string, public code?: string, public status?: number) { super(message); }
@@ -86,6 +96,34 @@ export function useChat(conversationId: string | null, bot: { id: string | null;
     }
   }, [conversationId]);
 
+  // A new, empty chat opens with a friendly greeting that mentions 1-2 unfinished things.
+  const [welcomeNonce, setWelcomeNonce] = useState(0);
+  useEffect(() => {
+    if (conversationId) return;
+    let cancelled = false;
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    fetch(`/api/welcome?timeZone=${encodeURIComponent(timeZone)}${bot.id ? `&botId=${encodeURIComponent(bot.id)}` : ""}`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (cancelled || !data?.greeting || activeConversationRef.current) return;
+        const items: WelcomeItem[] = data.items || [];
+        if (bot.id && !items.length) return; // custom bots keep their own greeting
+        const content = items.length ? (data.hello || data.greeting) : data.greeting;
+        setMessages(current => current.length && !(current.length === 1 && current[0].id === WELCOME_ID) ? current
+          : [{ id: WELCOME_ID, role: "assistant", content, timestamp: new Date(), metadata: { welcome: true, welcomeItems: items, welcomeText: data.greeting } }]);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [conversationId, bot.id, welcomeNonce]);
+
+  // Done / Not now on a welcome item: update the server and drop the chips for it.
+  const resolveFollowUp = useCallback(async (itemId: string, status: "done" | "dismissed") => {
+    setMessages(current => current.map(m => m.metadata?.welcomeItems
+      ? { ...m, metadata: { ...m.metadata, welcomeItems: m.metadata.welcomeItems.filter(i => i.id !== itemId) } } : m));
+    try { await apiRequest("PATCH", `/api/followups/${itemId}`, { status }); } catch { /* chips are a convenience */ }
+    cache.invalidateQueries({ queryKey: ["/api/followups"] });
+  }, [cache]);
+
   const history = useQuery({
     queryKey: ["/api/conversations", conversationId, "messages"],
     enabled: !!conversationId,
@@ -101,7 +139,8 @@ export function useChat(conversationId: string | null, bot: { id: string | null;
       }));
       // Keep messages that only exist in this browser (fallback replies, reminders).
       setMessages(current => {
-        const localOnly = current.filter(item => isLocalOnly(item.id) && !saved.some(message => message.id === item.id));
+        const savedWelcome = saved.some(message => (message.metadata as any)?.welcome);
+        const localOnly = current.filter(item => isLocalOnly(item.id) && !saved.some(message => message.id === item.id) && !(item.id === WELCOME_ID && (savedWelcome || saved.length)));
         return [...saved, ...localOnly].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
       });
     }
@@ -125,7 +164,11 @@ export function useChat(conversationId: string | null, bot: { id: string | null;
   const messagesRef = useRef<Message[]>([]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
-  const postChat = useCallback(async (message: string, settings: ChatSettings, targetId: string) => {
+  const abortRef = useRef<AbortController | null>(null);
+  const partialRef = useRef<{ id: string; text: string } | null>(null);
+  const inflightRef = useRef<Promise<unknown> | null>(null);
+
+  const postChat = useCallback(async (message: string, settings: ChatSettings, targetId: string, extra: Record<string, unknown>, signal: AbortSignal) => {
     // What the user last saw from the assistant (including local fallback replies), for "what did you say?".
     const lastReply = [...messagesRef.current].reverse().find(item => item.role === "assistant" && item.content.trim())?.content.slice(0, 8000);
     const response = await fetch("/api/chat", {
@@ -139,7 +182,9 @@ export function useChat(conversationId: string | null, bot: { id: string | null;
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         stream: true,
         ...(lastReply ? { lastReply } : {}),
+        ...extra,
       }),
+      signal,
     });
     notifyIfUnauthorized(response);
     if (!response.ok) throw await readError(response);
@@ -168,6 +213,7 @@ export function useChat(conversationId: string | null, bot: { id: string | null;
         const event = JSON.parse(line);
         if (event.type === "delta") {
           text += event.text;
+          partialRef.current = { id, text };
           if (!started) { started = true; setStreamingId(id); }
           show(text);
         } else if (event.type === "done") {
@@ -185,9 +231,29 @@ export function useChat(conversationId: string | null, bot: { id: string | null;
     else throw new ChatError("The answer was interrupted. Please try again.");
   }, [finishReply]);
 
-  const sendMessage = useCallback(async (content: string, settings: ChatSettings): Promise<string | null> => {
-    if (!content.trim() || busyRef.current) return null;
+  // Stops the reply being written right now. The server cancels the AI call and keeps what was said.
+  const stop = useCallback(() => {
+    if (!abortRef.current) return false;
+    abortRef.current.abort();
+    return true;
+  }, []);
+
+  const sendMessage = useCallback(async (content: string, settings: ChatSettings, options: SendOptions = {}): Promise<string | null> => {
+    if (!content.trim()) return null;
+    // Talking over Bertha works like with a person: she stops and listens to the new message.
+    let interrupted = false;
+    if (busyRef.current) {
+      interrupted = stop();
+      if (inflightRef.current) await inflightRef.current.catch(() => {});
+      if (busyRef.current) return null;
+    }
     busyRef.current = true;
+    let release: () => void = () => {};
+    inflightRef.current = new Promise<void>(resolve => { release = resolve; });
+    const controller = new AbortController();
+    abortRef.current = controller;
+    partialRef.current = null;
+    const welcome = messagesRef.current.find(m => m.id === WELCOME_ID);
     setIsLoading(true);
     const userMessageId = crypto.randomUUID();
     setMessages(previous => [...previous, {
@@ -200,14 +266,29 @@ export function useChat(conversationId: string | null, bot: { id: string | null;
         const conversation = await response.json();
         targetId = conversation.id as string;
         activeConversationRef.current = targetId;
+        // The server names the chat after the first exchange; refresh the sidebar when it has.
+        setTimeout(() => cache.invalidateQueries({ queryKey: ["/api/conversations"] }), 4000);
       }
-      await postChat(content.trim(), settings, targetId);
+      const extra: Record<string, unknown> = {};
+      if (interrupted) extra.interrupted = true;
+      if (options.voice) extra.voice = true;
+      if (welcome && messagesRef.current.filter(m => m.role !== "system" && m.id !== WELCOME_ID).length <= 1) extra.greeting = welcome.metadata?.welcomeText || welcome.content;
+      await postChat(content.trim(), settings, targetId, extra, controller.signal);
       cache.invalidateQueries({ queryKey: ["/api/conversations"] });
       cache.invalidateQueries({ queryKey: ["appointments"] });
       cache.invalidateQueries({ queryKey: ["/api/appointments"] });
       cache.invalidateQueries({ queryKey: ["appointment-reminders"] });
       return targetId;
     } catch (error) {
+      if (controller.signal.aborted || isAbort(error)) {
+        // Interrupted: keep what was already said, marked as cut off, and say nothing more.
+        const partial = partialRef.current as { id: string; text: string } | null;
+        if (partial?.text.trim()) {
+          finishReply({ id: partial.id, role: "assistant", content: `${partial.text.trimEnd()} …`, timestamp: new Date(), metadata: { interrupted: true } });
+        }
+        cache.invalidateQueries({ queryKey: ["/api/conversations"] });
+        return activeConversationRef.current;
+      }
       const reason = describeChatError(error);
       console.error("Chat request failed:", error);
       // The server did not save this exchange, so keep both bubbles locally.
@@ -228,22 +309,24 @@ export function useChat(conversationId: string | null, bot: { id: string | null;
       toast({ title: reason.code === "insufficient_quota" ? `${bot.name}'s AI is out of credits` : reason.ai ? `${bot.name}'s AI service is unavailable` : "Message not sent", description: reason.detail, variant: "destructive", duration: 10000 });
       return activeConversationRef.current;
     } finally {
+      if (abortRef.current === controller) abortRef.current = null;
       busyRef.current = false;
       setIsLoading(false);
       setStreamingId(null);
+      release();
     }
-  }, [addAssistantMessage, postChat, toast, cache, bot.id, bot.name, isBertha]);
+  }, [addAssistantMessage, finishReply, postChat, stop, toast, cache, bot.id, bot.name, isBertha]);
 
   const addSystemMessage = useCallback((content: string) => {
     setMessages(previous => [...previous, { id: crypto.randomUUID(), role: "system", content, timestamp: new Date() }]);
   }, []);
-  const clearMessages = useCallback(() => { setMessages([]); setLatestReply(null); }, []);
+  const clearMessages = useCallback(() => { setMessages([]); setLatestReply(null); setWelcomeNonce(n => n + 1); }, []);
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
 
   return {
-    messages, latestReply, isLoading, isStreaming: !!streamingId, sendMessage, addAssistantMessage,
+    messages, latestReply, isLoading, isStreaming: !!streamingId, sendMessage, stop, resolveFollowUp, addAssistantMessage,
     addSystemMessage, clearMessages, scrollToBottom, messagesEndRef,
     historyError: history.error,
   };

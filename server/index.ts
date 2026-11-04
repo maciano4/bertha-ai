@@ -4,6 +4,7 @@ import { setupVite, serveStatic, log } from "./vite";
 import { configureSessions } from "./auth";
 import { ensureAppointmentsTable } from "./appointments";
 import { ensurePlatformTables } from "./platformTables";
+import { ensureMemoryTables } from "./memory";
 
 const app = express();
 app.use(express.json({ limit: "15mb" }));
@@ -43,6 +44,7 @@ app.use((req, res, next) => {
 (async () => {
   await ensurePlatformTables();
   await ensureAppointmentsTable();
+  await ensureMemoryTables();
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {

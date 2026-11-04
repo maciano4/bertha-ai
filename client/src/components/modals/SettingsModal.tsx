@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { VoiceProfileManager } from "../voice/VoiceProfileManager";
 import { VoiceSettings } from "../VoiceSettings";
+import MemoryPanel from "../panels/MemoryPanel";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -230,6 +231,13 @@ export default function SettingsModal({ isOpen, onClose, onBackgroundChange }: S
                 />
               </div>
             </div>
+          </div>
+
+          <Separator />
+
+          {/* Memory, unfinished things, interruptions */}
+          <div className="-m-4">
+            <MemoryPanel />
           </div>
 
           <Separator />

@@ -1,3 +1,4 @@
+import { bargeInSupported, micAlreadyAllowed, startBargeIn } from "@/lib/bargeIn";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useChat } from "@/hooks/useChat";
 import { useSpeech } from "@/hooks/useSpeech";
@@ -46,7 +47,7 @@ export default function ChatInterface({ conversationId, onConversationStart, bot
     wakeWordEnabled: true
   });
 
-  const { messages, latestReply, isLoading, isStreaming, sendMessage, addAssistantMessage, historyError, messagesEndRef, scrollToBottom } = useChat(conversationId, { id: bot.id, name: bot.name });
+  const { messages, latestReply, isLoading, isStreaming, sendMessage, stop, resolveFollowUp, addAssistantMessage, historyError, messagesEndRef, scrollToBottom } = useChat(conversationId, { id: bot.id, name: bot.name });
   const [prefill, setPrefill] = useState<{ text: string; nonce: number } | undefined>(undefined);
   const { speak, stopSpeaking, isSpeaking, setWakeWordCallbacks, initializeSpeechSynthesis, initializeAudioContext } = useSpeech();
   const {
@@ -97,10 +98,12 @@ export default function ChatInterface({ conversationId, onConversationStart, bot
   }, []);
 
   // Create conversation when first message is sent (stable callback to prevent wake word restarts)
-  const handleSendMessage = useCallback(async (message: string) => {
-    const id = await sendMessage(message, settings);
+  const handleSendMessage = useCallback(async (message: string, options: { voice?: boolean } = {}) => {
+    stopSpeaking(); // a new message cuts her off, like a person would stop talking
+    const id = await sendMessage(message, settings, options);
     if (id && id !== conversationId) onConversationStart(id);
-  }, [conversationId, onConversationStart, sendMessage, settings]);
+  }, [conversationId, onConversationStart, sendMessage, settings, stopSpeaking]);
+  const handleStop = useCallback(() => { stop(); stopSpeaking(); }, [stop, stopSpeaking]);
   const sendMessageRef = useRef(handleSendMessage);
   sendMessageRef.current = handleSendMessage;
   const isLoadingRef = useRef(isLoading);
@@ -180,13 +183,10 @@ export default function ChatInterface({ conversationId, onConversationStart, bot
       // Start wake word listening with stable message handling  
       startWakeWordListening((message: string) => {
         console.log('Wake word message received:', message);
-        if (isLoadingRef.current) {
-          queuedWhileLoadingRef.current = `${queuedWhileLoadingRef.current} ${message}`.trim();
-          return;
-        }
+        // Speaking while she answers interrupts her; the new words are answered instead.
         toast({ title: `${botRef.current.name} heard you`, description: `"${message.slice(0, 60)}${message.length > 60 ? "..." : ""}"`, duration: 2500 });
         // Use the existing handleSendMessage which properly manages conversation creation
-        sendMessageRef.current(message);
+        sendMessageRef.current(message, { voice: true });
       }, () => {
         // Only the wake word was said: answer right away (no AI needed) and wait for the request.
         addAssistantMessage(botRef.current.id ? "I'm listening. What can I do for you?" : "Yes, dear, I'm listening. What can I do for you?", `local-ack-${Date.now()}`);
@@ -269,6 +269,24 @@ export default function ChatInterface({ conversationId, onConversationStart, bot
               assistant={bot}
               data-testid={`message-${message.role}-${message.id}`}
             />
+            {!!message.metadata?.welcomeItems?.length && (
+              <div className="ml-11 mt-2 space-y-2" data-testid="welcome-items">
+                {message.metadata.welcomeItems.map(item => (
+                  <div key={item.id} className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card/60 px-3 py-2 text-sm" data-testid={`followup-${item.id}`}>
+                    <span className="min-w-0 flex-1">{item.text}</span>
+                    {(item.kind === "unfinished" || item.kind === "question") && message.metadata?.welcomeItems && (
+                      <Button size="sm" variant="secondary" className="h-7" onClick={() => {
+                        resolveFollowUp(item.id, "done");
+                        if (item.kind === "unfinished" && item.conversationId) onConversationStart(item.conversationId); // reopen that chat
+                        else handleSendMessage(item.summary || item.text);
+                      }} data-testid={`followup-resume-${item.id}`}>{item.kind === "question" ? "Ask again" : "Continue"}</Button>
+                    )}
+                    <Button size="sm" variant="secondary" className="h-7" onClick={() => resolveFollowUp(item.id, "done")} data-testid={`followup-done-${item.id}`}>Done</Button>
+                    <Button size="sm" variant="ghost" className="h-7" onClick={() => resolveFollowUp(item.id, "dismissed")} data-testid={`followup-dismiss-${item.id}`}>Not now</Button>
+                  </div>
+                ))}
+              </div>
+            )}
             {/* Show NLP insights for user messages if available */}
             {message.role === "user" && (message.metadata as MessageMetadata)?.nlpAnalysis && settings.showNLPInsights && (
               <div className="ml-4 mt-2">
@@ -295,6 +313,19 @@ export default function ChatInterface({ conversationId, onConversationStart, bot
           </div>
         )}
 
+        {isSpeaking && (
+          <div className="sticky bottom-2 z-10 flex justify-center">
+            <button type="button" onClick={e => { e.stopPropagation(); stopSpeaking(); }}
+              className="inline-flex items-center gap-2 rounded-full border border-border bg-card/95 px-4 py-2 text-sm shadow-md backdrop-blur hover:bg-muted"
+              aria-label={`Stop ${bot.name} speaking`} data-testid="button-stop-speaking">
+              <span className="flex h-3 items-end gap-0.5" aria-hidden>
+                <span className="w-0.5 animate-pulse bg-primary h-2" /><span className="w-0.5 animate-pulse bg-primary h-3 [animation-delay:150ms]" /><span className="w-0.5 animate-pulse bg-primary h-1.5 [animation-delay:300ms]" />
+              </span>
+              {bot.name} is speaking · tap to stop
+            </button>
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -314,6 +345,7 @@ export default function ChatInterface({ conversationId, onConversationStart, bot
           botName={bot.name}
           prefill={prefill}
           onSendMessage={handleSendMessage}
+          onStop={handleStop}
           isLoading={isLoading}
           language={settings.language}
           speechEnabled={settings.speechEnabled}
