@@ -14,6 +14,7 @@ export default function AuthPage({ initialMode = "login", embedded = false, sign
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const isSignup = mode === "signup";
+  const passwordUpdated = !isSignup && typeof window !== "undefined" && new URLSearchParams(window.location.search).get("passwordReset") === "1";
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -62,7 +63,17 @@ export default function AuthPage({ initialMode = "login", embedded = false, sign
             <Input id="password" type="password" autoComplete={isSignup ? "new-password" : "current-password"} required minLength={isSignup ? 8 : undefined}
               value={password} onChange={e => setPassword(e.target.value)} data-testid="input-password" />
             {isSignup && <p className="text-xs text-muted-foreground">At least 8 characters.</p>}
+            {!isSignup && (
+              <a href="/forgot-password" className="inline-block text-sm font-medium text-primary underline-offset-4 hover:underline" data-testid="link-forgot-password">
+                Forgot password?
+              </a>
+            )}
           </div>
+          {passwordUpdated && !error && (
+            <p role="status" className="rounded-md bg-primary/10 px-3 py-2 text-sm text-foreground" data-testid="text-password-reset">
+              Your password was updated. Please log in.
+            </p>
+          )}
           {error && <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive" data-testid="text-auth-error">{error}</p>}
           <Button type="submit" className="w-full" disabled={busy || !email || !password} data-testid="button-auth-submit">
             {busy ? "Please wait..." : isSignup ? "Create account" : "Log in"}

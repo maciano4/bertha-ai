@@ -212,6 +212,18 @@ export const berthaUsers = pgTable("bertha_users", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// One-time password reset links. Only a hash of the token is stored.
+export const berthaPasswordResets = pgTable("bertha_password_resets", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => berthaUsers.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique("bertha_password_resets_token_hash_unique"),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  usedAt: timestamp("used_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  index("bertha_password_resets_user").on(table.userId),
+]);
+
 // Custom bots ("Bertha" herself is the built-in default and has no row).
 export const berthaBots = pgTable("bertha_bots", {
   id: text("id").primaryKey(),

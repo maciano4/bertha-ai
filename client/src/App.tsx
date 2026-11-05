@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Home from "@/pages/home";
 import Appointments from "@/pages/appointments";
 import AuthPage from "@/pages/auth";
+import PasswordResetPage from "@/pages/password-reset";
 import NotFound from "@/pages/not-found";
 import BotsPage from "@/pages/bots";
 import BotEditor from "@/pages/bot-editor";
@@ -40,10 +41,17 @@ const Splash = ({ children }: { children: React.ReactNode }) => (
   </div>
 );
 
+function isPasswordResetPath(location: string) {
+  const path = location.split("?")[0].replace(/\/$/, "") || "/";
+  return path === "/forgot-password" || path === "/reset-password";
+}
+
 // Everything in the app needs an account; show login/sign-up until there is one.
+// The reset pages stay reachable while signed in, so an emailed link always opens the form.
 function AuthGate() {
   const { user, isLoading, loadError } = useAuth();
   const [location] = useLocation();
+  if (isPasswordResetPath(location)) return <PasswordResetPage />;
   if (isLoading) return <Splash><span role="status">Loading Bertha...</span></Splash>;
   if (loadError) {
     return (

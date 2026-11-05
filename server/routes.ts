@@ -16,6 +16,7 @@ import multer from "multer";
 import { registerAppointmentRoutes, handleAppointmentChat, handleReminderChat, listAppointments } from "./appointments";
 import { describeTime, validTimeZone } from "./appointmentDates";
 import { registerAuthRoutes, requireAuth } from "./auth";
+import { registerPasswordResetRoutes } from "./passwordReset";
 import * as chats from "./chatStore";
 import { registerBotRoutes, registerPublicBotRoutes, getChatBot, rememberSharedBot } from "./bots";
 import { assertCanSendMessage, recordMessage, LimitError } from "./limits";
@@ -30,6 +31,7 @@ function sendError(res: Response, error: unknown, fallback: string) {
 
 export async function registerRoutes(app: Express): Promise<Server> {
   registerAuthRoutes(app);
+  registerPasswordResetRoutes(app);
   registerPublicBotRoutes(app); // share-link cards work signed out
   // Everything else under /api needs a signed-in account; data is scoped to req.user.id.
   app.use("/api", requireAuth);

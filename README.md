@@ -71,6 +71,35 @@ Bertha is a voice-first personal assistant with a warm grandmother persona. You 
 | `BERTHA_ENFORCE_LIMITS` | no | `true` turns on the free-plan limits below. Off by default. |
 | `BERTHA_FREE_MAX_BOTS` | no | Bots per user when limits are on. Defaults to 50. |
 | `BERTHA_FREE_DAILY_MESSAGES` | no | Messages per user per UTC day when limits are on. Defaults to 1000. |
+| `SMTP_URL` or `SMTP_HOST` | no | Sends password-reset email over SMTP. See [Forgot password](#forgot-password). |
+| `RESEND_API_KEY` | no | Sends password-reset email through [Resend](https://resend.com) when SMTP is not set. |
+| `SENDGRID_API_KEY` | no | Sends password-reset email through SendGrid when SMTP and Resend are not set. |
+| `MAIL_FROM` | no | From address for reset email, for example `Bertha <noreply@yourdomain.com>`. `SMTP_FROM` and `EMAIL_FROM` are also accepted. |
+| `APP_URL` | no | Public site origin used in the reset link, for example `https://bertha.example.com`. If unset, the link uses the host on the request. |
+
+## Forgot password
+
+The login page has a **Forgot password?** link under the password field. The next page asks for an email and always answers the same way, whether or not that email has an account:
+
+> If an account exists for that email, we sent a link to reset your password. It expires in one hour.
+
+When the email belongs to an account, Bertha emails a one-time link. The link opens a page to choose a new password (entered twice, at least 8 characters). The link expires after one hour and stops working after a successful reset. A successful reset also signs that account out everywhere, so old sessions can't keep using the previous password. Nothing changes an existing password unless someone finishes this flow with a valid link.
+
+### Email
+
+Set **one** of these so the link is actually emailed. SMTP is used first, then Resend, then SendGrid.
+
+| Name | What to put |
+|---|---|
+| `SMTP_URL` | Full SMTP URL, for example `smtp://user:pass@smtp.example.com:587` or `smtps://user:pass@smtp.example.com:465`. URL-encode special characters in the password. |
+| `SMTP_HOST` | SMTP hostname, if you don't use `SMTP_URL`. Optional companions: `SMTP_PORT` (default `587`), `SMTP_USER` (or `SMTP_USERNAME`), `SMTP_PASSWORD` (or `SMTP_PASS`), `SMTP_SECURE=true` for implicit TLS (typical on port 465). |
+| `RESEND_API_KEY` | API key from Resend. |
+| `SENDGRID_API_KEY` | API key from SendGrid. |
+| `MAIL_FROM` | From address on a domain the provider lets you send from. Without it, mail is sent as `Bertha <noreply@bertha.app>`, which most providers reject. |
+
+If none of `SMTP_URL`, `SMTP_HOST`, `RESEND_API_KEY`, or `SENDGRID_API_KEY` is set, no email is sent. Outside production (`NODE_ENV` anything other than `production`, including `npm run dev`) the server prints the reset link in the console and adds `resetUrl` to the forgot-password response so you can open it. Production never logs or returns that link. Set `NODE_ENV=production` on the published app, and set an email provider, or people will not receive reset emails.
+
+`POST /api/auth/forgot-password` with `{email}` returns `{message}`. `POST /api/auth/reset-password` with `{token, password, confirmPassword}` returns `{ok, message}` or `{error}`.
 
 ## Running it
 
@@ -78,10 +107,11 @@ Bertha is a voice-first personal assistant with a warm grandmother persona. You 
 npm install
 npm run dev        # development: http://localhost:5000
 npm run check      # type check
+npm test           # password-reset API tests and a login-page check (needs Postgres)
 npm run build && npm start   # production
 ```
 
-The database tables (`bertha_users`, `bertha_conversations`, `bertha_messages`, `bertha_sessions`, `bertha_appointments`, `bertha_bots`, `bertha_usage_daily`) are created automatically when the server starts, so no migration step is needed. Open the app, choose **Create an account**, and start chatting.
+The database tables (`bertha_users`, `bertha_conversations`, `bertha_messages`, `bertha_sessions`, `bertha_appointments`, `bertha_bots`, `bertha_usage_daily`, `bertha_password_resets`) are created automatically when the server starts, so no migration step is needed. Open the app, choose **Create an account**, and start chatting.
 
 ### About `npm run db:push`
 
@@ -89,7 +119,7 @@ You don't need to run it. `shared/schema.ts` still contains older, unused tables
 
 ## API overview (all under `/api`, all require sign-in except `/api/auth/*` and `/api/public/*`)
 
-- **Accounts.** `POST /auth/signup` with `{email, password, displayName?, timeZone?}`. Also `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` and `PATCH /auth/me`.
+- **Accounts.** `POST /auth/signup` with `{email, password, displayName?, timeZone?}`. Also `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` and `PATCH /auth/me`. `POST /auth/forgot-password` and `POST /auth/reset-password` are the password reset flow (see [Forgot password](#forgot-password)).
 - **Conversations.** `GET /conversations` and `POST /conversations`, `GET/PATCH/DELETE /conversations/:id`, and `GET /conversations/:id/messages`.
 - **Chat.** `POST /chat` with `{message, conversationId, timeZone?, stream?}`:
   - Without streaming it returns JSON `{response, ...}`.

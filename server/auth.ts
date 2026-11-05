@@ -38,6 +38,13 @@ function sessionSecret() {
   return DEV_SECRET;
 }
 
+type SessionStore = {
+  all?: (callback: (error: Error | null, sessions?: Record<string, { userId?: string }> | null) => void) => void;
+  destroy: (sid: string | string[], callback?: (error?: Error | null) => void) => void;
+};
+
+let sessionStore: SessionStore | undefined;
+
 export function configureSessions(app: Express) {
   app.set("trust proxy", 1);
   // Sessions live in Postgres so logins survive restarts. SESSION_STORE=memory is for local tests only.
@@ -45,6 +52,7 @@ export function configureSessions(app: Express) {
   const store = useMemory
     ? new (createMemoryStore(session))({ checkPeriod: 24 * 60 * 60 * 1000 })
     : new (connectPgSimple(session))({ pool: pool as any, tableName: "bertha_sessions", createTableIfMissing: true });
+  sessionStore = store as SessionStore;
   app.use(session({
     name: "bertha.personal",
     secret: sessionSecret(),
@@ -119,6 +127,26 @@ async function signIn(req: Request, userId: string) {
 }
 
 const firstIssue = (error: z.ZodError) => error.issues[0]?.message || "Please check the form.";
+
+// Drop every signed-in session for this account (password reset, so old cookies stop working).
+export async function invalidateUserSessions(userId: string) {
+  if (process.env.SESSION_STORE === "memory" && sessionStore?.all) {
+    const sessions = await new Promise<Record<string, { userId?: string }>>((resolve, reject) => {
+      sessionStore!.all!((error, found) => error ? reject(error) : resolve(found || {}));
+    });
+    const sids = Object.entries(sessions).filter(([, sess]) => sess?.userId === userId).map(([sid]) => sid);
+    if (!sids.length) return;
+    await new Promise<void>((resolve, reject) => {
+      sessionStore!.destroy(sids, error => error ? reject(error) : resolve());
+    });
+    return;
+  }
+  try {
+    await pool.query(`DELETE FROM bertha_sessions WHERE sess->>'userId' = $1`, [userId]);
+  } catch (error: any) {
+    if (error?.code !== "42P01") throw error; // session table is created on first login
+  }
+}
 
 export function registerAuthRoutes(app: Express) {
   app.post("/api/auth/signup", async (req, res) => {
