@@ -94,6 +94,20 @@ export async function ensurePlatformTables() {
     CONSTRAINT bertha_bot_shares_bot_id_bertha_bots_id_fk
       FOREIGN KEY (bot_id) REFERENCES bertha_bots(id) ON DELETE CASCADE
   )`);
+  // One-time password reset links. The raw token is never stored, only its hash.
+  await pool.query(`CREATE TABLE IF NOT EXISTS bertha_password_resets (
+    id text PRIMARY KEY,
+    user_id text NOT NULL,
+    token_hash text NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    used_at timestamp with time zone,
+    created_at timestamp with time zone NOT NULL DEFAULT now(),
+    CONSTRAINT bertha_password_resets_token_hash_unique UNIQUE (token_hash),
+    CONSTRAINT bertha_password_resets_user_id_bertha_users_id_fk
+      FOREIGN KEY (user_id) REFERENCES bertha_users(id) ON DELETE CASCADE
+  )`);
+  await pool.query(`CREATE INDEX IF NOT EXISTS bertha_password_resets_user
+    ON bertha_password_resets USING btree (user_id)`);
   // Anyone who already chatted with someone else's bot keeps it in their sidebar.
   await pool.query(`INSERT INTO bertha_bot_shares (user_id, bot_id)
     SELECT DISTINCT c.user_id, c.bot_id FROM bertha_conversations c JOIN bertha_bots b ON b.id = c.bot_id
