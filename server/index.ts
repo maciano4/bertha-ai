@@ -5,6 +5,9 @@ import { configureSessions } from "./auth";
 import { ensureAppointmentsTable } from "./appointments";
 import { ensurePlatformTables } from "./platformTables";
 import { ensureMemoryTables } from "./memory";
+import { ensureVoiceTables } from "./voice/tables";
+import { attachMediaStream } from "./voice/mediaStream";
+import { getVoiceDeps } from "./voice/deps";
 
 const app = express();
 app.use(express.json({ limit: "15mb" }));
@@ -45,6 +48,7 @@ app.use((req, res, next) => {
   await ensurePlatformTables();
   await ensureAppointmentsTable();
   await ensureMemoryTables();
+  await ensureVoiceTables();
   const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -63,6 +67,8 @@ app.use((req, res, next) => {
   } else {
     serveStatic(app);
   }
+  // After Vite, so its dev socket keeps every upgrade except the Twilio media stream.
+  attachMediaStream(server, getVoiceDeps());
 
   // ALWAYS serve the app on the port specified in the environment variable PORT
   // Other ports are firewalled. Default to 5000 if not specified.

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, X, Search, ChevronRight, SquarePen, Trash2, CalendarDays, LogOut, Settings, Bot as BotIcon, ChevronsUpDown } from "lucide-react";
+import { Plus, X, Search, ChevronRight, SquarePen, Trash2, CalendarDays, LogOut, Settings, Bot as BotIcon, ChevronsUpDown, Phone } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import BotAvatar from "@/components/bots/BotAvatar";
 import InstallApp from "./InstallApp";
@@ -47,6 +47,7 @@ export default function BotSidebar({ onClose }: { onClose: () => void }) {
   const shared = useQuery<PublicBot[]>({ queryKey: ["/api/bots/shared"] });
   const conversations = useQuery<ConversationSummary[]>({ queryKey: ["/api/conversations"] });
   const usage = useQuery<Usage>({ queryKey: ["/api/usage"] });
+  const voice = useQuery<{ isOwner: boolean }>({ queryKey: ["/api/voice/settings"] });
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   useEffect(() => { const t = setTimeout(() => setDebounced(query.trim()), 250); return () => clearTimeout(t); }, [query]);
@@ -240,6 +241,11 @@ export default function BotSidebar({ onClose }: { onClose: () => void }) {
         <Link href="/appointments" className={cn("flex h-9 items-center gap-2.5 rounded-lg px-2 text-sm text-foreground/80 hover:bg-sidebar-accent hover:text-foreground", location === "/appointments" && "bg-sidebar-accent text-foreground")} data-testid="link-appointments">
           <CalendarDays className="h-4 w-4" /> Appointments
         </Link>
+        {voice.data?.isOwner && (
+          <Link href="/calls" className={cn("flex h-9 items-center gap-2.5 rounded-lg px-2 text-sm text-foreground/80 hover:bg-sidebar-accent hover:text-foreground", location === "/calls" && "bg-sidebar-accent text-foreground")} data-testid="link-calls">
+            <Phone className="h-4 w-4" /> Calls
+          </Link>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button type="button" className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring" data-testid="button-account">

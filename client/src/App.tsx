@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Home from "@/pages/home";
 import Appointments from "@/pages/appointments";
+import CallsPage from "@/pages/calls";
 import AuthPage from "@/pages/auth";
 import NotFound from "@/pages/not-found";
 import BotsPage from "@/pages/bots";
@@ -19,6 +20,7 @@ function Router() {
     <Switch>
       <Route path="/" component={Home} />
       <Route path="/appointments" component={Appointments} />
+      <Route path="/calls" component={CallsPage} />
       <Route path="/bots" component={BotsPage} />
       <Route path="/bots/new" component={BotEditor} />
       <Route path="/bots/:id/edit" component={BotEditor} />

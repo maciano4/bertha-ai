@@ -250,6 +250,39 @@ export const berthaUsageDaily = pgTable("bertha_usage_daily", {
   aiMessages: integer("ai_messages").notNull().default(0),
 }, table => [primaryKey({ columns: [table.userId, table.day], name: "bertha_usage_daily_pk" })]);
 
+// Missed-call answering. One row per owner account; created at server start (server/voice/tables.ts).
+export const berthaVoiceSettings = pgTable("bertha_voice_settings", {
+  userId: text("user_id").primaryKey().references(() => berthaUsers.id, { onDelete: "cascade" }),
+  answeringEnabled: boolean("answering_enabled").notNull().default(true),
+  greeting: text("greeting"),
+  availabilityNote: text("availability_note"),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const berthaCalls = pgTable("bertha_calls", {
+  id: text("id").primaryKey(),
+  callSid: text("call_sid").notNull().unique("bertha_calls_call_sid_unique"),
+  ownerId: text("owner_id").references(() => berthaUsers.id, { onDelete: "set null" }),
+  fromNumber: text("from_number").notNull(),
+  toNumber: text("to_number"),
+  forwardedFrom: text("forwarded_from"),
+  status: text("status").notNull().default("ringing"),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  endedAt: timestamp("ended_at", { withTimezone: true }),
+  durationSeconds: integer("duration_seconds"),
+  transcript: text("transcript").notNull().default(""),
+  summary: text("summary"),
+  aiUnavailable: boolean("ai_unavailable").notNull().default(false),
+  answeringEnabled: boolean("answering_enabled").notNull().default(true),
+  smsStatus: text("sms_status").notNull().default("pending"),
+  smsError: text("sms_error"),
+  fallbackPlayed: boolean("fallback_played").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, table => [
+  index("bertha_calls_owner_started").on(table.ownerId, table.startedAt),
+]);
+
 export const berthaConversations = pgTable("bertha_conversations", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => berthaUsers.id, { onDelete: "cascade" }),

@@ -14,5 +14,5 @@ export default defineConfig({
   // Only manage the Stage 1 platform tables. Without this filter a push could offer to
   // DROP tables that are not in schema.ts (bertha_sessions, bertha_appointments).
   // The server also creates these tables on startup, so a push is optional.
-  tablesFilter: ["bertha_users", "bertha_conversations", "bertha_messages","bertha_bots","bertha_usage_daily","bertha_bot_shares"],
+  tablesFilter: ["bertha_users", "bertha_conversations", "bertha_messages","bertha_bots","bertha_usage_daily","bertha_bot_shares","bertha_voice_settings","bertha_calls"],
 });

@@ -2,6 +2,29 @@
 
 Bertha is a voice-first personal assistant with a warm grandmother persona. You can talk to her ("Hi Bertha"), type to her, have her save appointments and reminders, and have her write texts, emails, social posts and cover letters.
 
+## Missed calls
+
+When someone calls Bertha's Twilio number — or your carrier forwards an unanswered call there — Bertha picks up, has a short conversation, and texts Chris a summary. The same call shows up in the app under **Calls** for the signed-in owner.
+
+- **Answer.** `POST /api/voice/incoming` returns TwiML that connects a Media Stream to `wss://<public-host>/api/voice/media-stream`. Audio stays G.711 μ-law and is bridged to the OpenAI Realtime API (`OPENAI_REALTIME_MODEL`, default `gpt-realtime-2.1`; `gpt-realtime` is the stable alias).
+- **Persona.** Bertha says she is Chris's assistant and that he missed the call. She takes a message, asks who is calling and why, and only talks about his availability when an availability note is saved. She does not invent appointments or commit Chris to anything.
+- **After hangup.** The call (number, duration, transcript, summary) is stored in Postgres. Tables are created when the server starts. A short SMS goes to `OWNER_PHONE` from `TWILIO_PHONE_NUMBER`.
+- **If OpenAI cannot take the call** (no key, no credits, or the realtime model rejects the session), the caller hears: "Bertha can't take this call right now, please try again later." Chris still gets a text that a call was missed but AI was unavailable.
+- **In the app.** The owner sees **Calls** in the sidebar: Bertha's number, an on/off switch, an optional greeting, an optional availability note, the call list, and the setup steps. Other signed-in accounts do not see the calls.
+- **Who is the owner.** `OWNER_EMAIL`, if set, must match the account. Otherwise the oldest account is the owner.
+
+### Twilio setup
+
+1. Buy a voice-capable Twilio number (Console → Phone Numbers → Buy a number). A trial number works for testing once the destination is verified.
+2. Open that number → **Voice configuration**.
+3. Set **A call comes in** to **Webhook**, **HTTP POST**, and `https://<public-host>/api/voice/incoming`.
+4. Set **Call status changes** to **HTTP POST** and `https://<public-host>/api/voice/status`. Bertha also tries to attach this callback itself when `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` are set.
+5. **Replit.** Use the public HTTPS preview URL (the one Twilio can reach from the internet), not `localhost` and not an internal host. The media stream must be `wss://` on that same host. `PUBLIC_BASE_URL` (origin only, no path) overrides the host Bertha puts in TwiML and uses when checking Twilio's signature — set it if the preview host is rewritten.
+6. Optional: on your mobile carrier, forward unanswered calls to the Twilio number so a missed call on your personal phone lands on Bertha.
+7. Put the secrets below in Replit Secrets (or your host's env) and restart. In the app, open **Calls** and leave answering on.
+
+Twilio signs webhooks with `TWILIO_AUTH_TOKEN`. Validation is on in production. Set `TWILIO_VALIDATE_SIGNATURE=false` only for local debugging. The media-stream WebSocket is not signed by Twilio; each call gets a one-time token in the stream URL.
+
 ## What's new in Stage 2-app: Bertha looks and runs like an app
 
 - **One app screen.** The whole app is a single full-screen, dark view with no page scrolling. On the left is a sidebar: **+ New bot** at the top, then **Bertha** (always first), then **your bots**, then **Shared with me**. Each row shows the bot's picture and name. Click a bot to open its latest chat. Use the arrow to see its chats, start a **New chat**, or delete a chat. The old dashboard and separate chat list are gone.
@@ -58,7 +81,7 @@ Bertha is a voice-first personal assistant with a warm grandmother persona. You 
 |---|---|---|
 | `DATABASE_URL` | yes | Postgres connection string. On Replit this is set automatically when the database is added. |
 | `SESSION_SECRET` | yes in production | A long random string used to sign session cookies. If it's missing, a development fallback is used and a warning is printed. In production a random secret is generated on each boot, which signs everyone out on every restart. |
-| `OPENAI_API_KEY` | yes for AI replies | Your OpenAI key. `OpenAI_API_KEY` and `OPENAI_KEY` are also accepted. |
+| `OPENAI_API_KEY` | yes for AI replies and answering calls | Your OpenAI key. The missed-call bridge uses the same key for the Realtime API. `OpenAI_API_KEY` and `OPENAI_KEY` are also accepted. |
 | `OPENAI_MODEL` | no | The chat model. Defaults to `gpt-4o-mini`. Examples: `gpt-4o`, `gpt-4.1-mini`. |
 | `OPENAI_VISION_MODEL` | no | The model for image analysis and translation. Defaults to `OPENAI_MODEL`. |
 | `OPENAI_BASE_URL` | no | Points the SDK at a compatible endpoint (proxy, mock or Azure-style gateway). |
@@ -71,6 +94,15 @@ Bertha is a voice-first personal assistant with a warm grandmother persona. You 
 | `BERTHA_ENFORCE_LIMITS` | no | `true` turns on the free-plan limits below. Off by default. |
 | `BERTHA_FREE_MAX_BOTS` | no | Bots per user when limits are on. Defaults to 50. |
 | `BERTHA_FREE_DAILY_MESSAGES` | no | Messages per user per UTC day when limits are on. Defaults to 1000. |
+| `TWILIO_ACCOUNT_SID` | yes, for calls and SMS | Twilio account SID. Used to text the summary and to attach the call-status webhook. |
+| `TWILIO_AUTH_TOKEN` | yes, for calls and SMS | Twilio auth token. Also used to validate webhook signatures. Never commit it or print it. |
+| `TWILIO_PHONE_NUMBER` | yes, for SMS | Bertha's Twilio number in E.164, for example `+15551212000`. Shown in Calls and used as the SMS sender. |
+| `OWNER_PHONE` | yes, for SMS | Where the summary text is sent, in E.164. |
+| `TWILIO_VALIDATE_SIGNATURE` | no | `true` or `false`. Defaults to on when `NODE_ENV=production` and off otherwise. |
+| `OPENAI_REALTIME_MODEL` | no | Realtime model. Defaults to `gpt-realtime-2.1`. Use `gpt-realtime` if that snapshot is not on the account. |
+| `OPENAI_REALTIME_VOICE` | no | Realtime voice. Defaults to `marin` (`alloy` if the session falls back to the older realtime shape). |
+| `PUBLIC_BASE_URL` | no | Public origin only, such as `https://your-repl.replit.app`. Use it when the host Twilio calls is not the host the app sees. |
+| `OWNER_EMAIL` | no | Account that owns the Calls page. If unset, the oldest account is the owner. |
 
 ## Running it
 
@@ -81,13 +113,17 @@ npm run check      # type check
 npm run build && npm start   # production
 ```
 
-The database tables (`bertha_users`, `bertha_conversations`, `bertha_messages`, `bertha_sessions`, `bertha_appointments`, `bertha_bots`, `bertha_usage_daily`) are created automatically when the server starts, so no migration step is needed. Open the app, choose **Create an account**, and start chatting.
+The database tables (`bertha_users`, `bertha_conversations`, `bertha_messages`, `bertha_sessions`, `bertha_appointments`, `bertha_bots`, `bertha_usage_daily`, `bertha_voice_settings`, `bertha_calls`) are created automatically when the server starts, so no migration step is needed. Open the app, choose **Create an account**, and start chatting.
+
+```bash
+npm test           # voice TwiML, signature, call records, and SMS summary tests
+```
 
 ### About `npm run db:push`
 
 You don't need to run it. `shared/schema.ts` still contains older, unused tables (households, shopping lists and so on), so `drizzle-kit push` would offer to create those as well. If you do run it, read the statements it lists before confirming.
 
-## API overview (all under `/api`, all require sign-in except `/api/auth/*` and `/api/public/*`)
+## API overview (all under `/api`, all require sign-in except `/api/auth/*`, `/api/public/*`, and the Twilio voice webhooks)
 
 - **Accounts.** `POST /auth/signup` with `{email, password, displayName?, timeZone?}`. Also `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` and `PATCH /auth/me`.
 - **Conversations.** `GET /conversations` and `POST /conversations`, `GET/PATCH/DELETE /conversations/:id`, and `GET /conversations/:id/messages`.
@@ -99,6 +135,8 @@ You don't need to run it. `shared/schema.ts` still contains older, unused tables
 - **Bots.** `GET /bots` (yours), `POST /bots`, `GET /bots/:id` (the full bot for its owner; only the public card for others; 404 if private), `PATCH /bots/:id` and `DELETE /bots/:id` (owner only, `403 not_owner` otherwise), `POST /bots/:id/duplicate`, `POST /bots/:id/new-link`, `GET /bots/shared` (bots shared with you), `POST /bots/shared` with `{slug}` (add one from its link), `DELETE /bots/shared/:id` (remove it from your sidebar), `GET /bots/options` (allowed models and usage), `POST /bots/draft-instructions` with `{name, description, current?}`, and `GET /usage`.
   - Limits: name up to 60 characters, description 300, instructions 8000, greeting 500. Pictures must be `https://` links or small uploaded images.
 - **Shared card (no sign-in needed).** `GET /public/bots/:slug` returns the card for bots shared by link. It never includes the owner's email, the model or (unless allowed) the instructions.
+- **Missed calls (no sign-in; Twilio signature instead).** `POST /voice/incoming` returns TwiML. `POST /voice/stream-ended` plays the spoken fallback if the realtime session never started. `POST /voice/status` and `POST /voice/stream-status` save the call and text the summary. The WebSocket is `wss://<public-host>/api/voice/media-stream`.
+- **Missed calls (owner only).** `GET /voice/settings`, `PATCH /voice/settings` with `{answeringEnabled?, greeting?, availabilityNote?}`, and `GET /voice/calls`. Other accounts get `isOwner: false` from settings and `403` from the call list.
 - **Chatting with a bot.** `POST /conversations` with `{title, botId}`, then `POST /chat` as usual. The bot comes from the conversation. `GET /conversations?botId=<id|bertha>` filters the list. A bot that has been made private or deleted returns `403 bot_unavailable`. With limits on, `429 limit_reached`.
 
 ## Stage 2-fixes: honest AI errors, local answers, stricter intents
