@@ -199,9 +199,13 @@ export function registerAuthRoutes(app: Express) {
   });
 }
 
-// Every /api route except /api/auth/* needs a signed-in user.
+// Twilio posts these without a session. They check the Twilio signature instead.
+const VOICE_WEBHOOK = /^\/api\/voice\/(incoming|status|stream-ended|stream-status)$/;
+
+// Every /api route except /api/auth/* and the Twilio voice webhooks needs a signed-in user.
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (req.path.startsWith("/auth/")) return next();
+  const path = (req.originalUrl || "").split("?")[0];
+  if (path.startsWith("/api/auth/") || req.path.startsWith("/auth/") || VOICE_WEBHOOK.test(path)) return next();
   const userId = req.session.userId;
   if (!userId) return res.status(401).json({ error: "Please log in to use Bertha.", code: "not_signed_in" });
   try {
